@@ -77,6 +77,19 @@ app.include_router(detectors_router)
 app.include_router(analyze_router)
 
 
+@app.get("/", tags=["System"])
+async def root() -> dict[str, str]:
+    """Root endpoint — confirms API is online and points to docs."""
+    return {
+        "name": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "status": "online",
+        "message": "ThreatSense AI Cyber Threat Intelligence API is running.",
+        "docs_url": "/docs",
+        "health_url": "/health",
+    }
+
+
 # ── Startup / shutdown events ─────────────────────────────────────────────────
 @app.on_event("startup")
 async def on_startup() -> None:
