@@ -1,0 +1,47 @@
+services:
+  # ── Backend API ────────────────────────────────────────────────────────────
+  - type: web
+    name: threatsense-api
+    env: docker
+    region: oregon
+    plan: free
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///threatsense.db
+      - key: NLP_BACKEND
+        value: rules
+      - key: NLP_ZEROSHOT
+        value: "false"
+      - key: INTEL_OFFLINE
+        value: "false"
+      # Allow requests from any origin in production to avoid Render URL mismatch
+      - key: CORS_ORIGINS
+        value: "*"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+
+  # ── Frontend Static Site ───────────────────────────────────────────────────
+  - type: web
+    name: threatsense-ui
+    env: static
+    region: oregon
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      # Point the frontend at the live backend API
+      - key: VITE_API_URL
+        value: "https://threatsense-api.onrender.com"
+    headers:
+      # Ensure Vite SPA routing works — serve index.html for all routes
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
