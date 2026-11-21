@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import sys
 import time
 from datetime import datetime, timezone
@@ -42,6 +43,10 @@ ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+# Suppress noisy external library logs (HTTP requests, downloads, etc.)
+for noisy in ("urllib3", "httpx", "httpcore", "huggingface_hub", "transformers"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 
 # The 15 multi-label threat signals matching NLPSignals in schemas.py
 SIGNAL_LABELS = [
@@ -110,7 +115,273 @@ def _make_synthetic_dataset() -> list[dict]:
                 "investment_context": 1.0, "financial_intent": 0.9, "reward_scarcity": 0.8, "scam_intent": 0.9
             }
         },
+        {
+            "text": "Your parcel is held at customs. Pay the $2.99 clearance fee via this link within 24 hours or it will be returned.",
+            "labels": {
+                "urgency": 0.9, "payment_request": 0.9, "phishing_intent": 0.8, "manipulation": 0.6
+            }
+        },
+        {
+            "text": "Final notice: your electricity will be disconnected today. Call our billing line and settle the overdue amount by card.",
+            "labels": {
+                "urgency": 1.0, "fear": 0.9, "authority": 0.8, "government_service_claim": 0.7, "payment_request": 0.9
+            }
+        },
+        {
+            "text": "This is the IRS. A warrant has been issued for your arrest for unpaid taxes. Press 1 to speak with the officer.",
+            "labels": {
+                "authority": 1.0, "government_service_claim": 1.0, "fear": 1.0, "urgency": 0.9, "scam_intent": 1.0
+            }
+        },
+        {
+            "text": "Your Netflix payment failed. Update your card details here to avoid service interruption.",
+            "labels": {
+                "phishing_intent": 1.0, "credential_request": 0.8, "payment_request": 0.8, "urgency": 0.7, "fear": 0.4
+            }
+        },
+        {
+            "text": "Security alert: unusual sign-in from a new device. Confirm it was you by entering your email password.",
+            "labels": {
+                "fear": 0.8, "credential_request": 1.0, "phishing_intent": 1.0, "urgency": 0.6
+            }
+        },
+        {
+            "text": "DM me on Telegram to join the trading signals group. Members made 40% profit last week. Limited slots!",
+            "labels": {
+                "investment_context": 1.0, "reward_scarcity": 0.9, "scam_intent": 0.9, "financial_intent": 0.8, "manipulation": 0.7
+            }
+        },
+        {
+            "text": "Earn from home: no experience needed, flexible hours. Just pay the $99 starter kit fee to begin today.",
+            "labels": {
+                "recruitment_context": 1.0, "financial_intent": 0.8, "payment_request": 0.8, "scam_intent": 0.9
+            }
+        },
+        {
+            "text": "Congratulations! Your phone number was selected in our annual draw. Claim your iPhone 15 before midnight.",
+            "labels": {
+                "reward_scarcity": 1.0, "urgency": 0.8, "scam_intent": 1.0, "manipulation": 0.7
+            }
+        },
+        {
+            "text": "I am the CFO. I need you to buy 5 gift cards for client appreciation and send me the codes ASAP. Keep this confidential.",
+            "labels": {
+                "authority": 0.9, "urgency": 0.9, "payment_request": 1.0, "manipulation": 0.9, "scam_intent": 0.9
+            }
+        },
+        {
+            "text": "Your computer is infected with 14 viruses. Download our free antivirus tool now to clean your PC.",
+            "labels": {
+                "fear": 1.0, "tech_support_context": 1.0, "urgency": 0.8, "manipulation": 0.8, "scam_intent": 0.7
+            }
+        },
+        {
+            "text": "Microsoft support here: we detected malicious activity. Install this remote desktop app so a technician can access your machine.",
+            "labels": {
+                "tech_support_context": 1.0, "remote_access_request": 1.0, "authority": 0.9, "fear": 0.8, "phishing_intent": 0.8
+            }
+        },
+        {
+            "text": "Bank notice: your account will be frozen due to suspicious transactions. Verify your identity with your card PIN immediately.",
+            "labels": {
+                "fear": 1.0, "urgency": 1.0, "credential_request": 1.0, "phishing_intent": 1.0, "authority": 0.7
+            }
+        },
+        {
+            "text": "You have been chosen for a research panel. Complete the 2-minute survey and receive a $100 gift voucher.",
+            "labels": {
+                "reward_scarcity": 0.8, "scam_intent": 0.6, "manipulation": 0.5
+            }
+        },
+        {
+            "text": "Donate to the earthquake relief fund through our verified crypto wallet. Every satoshi counts. Act now.",
+            "labels": {
+                "payment_request": 0.9, "urgency": 0.8, "manipulation": 0.8, "financial_intent": 0.7, "scam_intent": 0.8
+            }
+        },
+        {
+            "text": "Romantic message: I can't wait to see you. My flight is booked but I'm stuck at customs and need $800 for the ticket fee. Wire it today please.",
+            "labels": {
+                "payment_request": 1.0, "urgency": 0.9, "manipulation": 0.9, "scam_intent": 1.0, "financial_intent": 0.8
+            }
+        },
+        {
+            "text": "Job offer from Silicon Valley startup: $180k/year, remote. Send your bank account number for the onboarding payroll setup.",
+            "labels": {
+                "recruitment_context": 1.0, "credential_request": 0.9, "reward_scarcity": 0.9, "phishing_intent": 0.9, "scam_intent": 1.0
+            }
+        },
+        {
+            "text": "MFA code request detected. If this wasn't you, share the 6-digit code we just texted you so support can block the attacker.",
+            "labels": {
+                "credential_request": 1.0, "phishing_intent": 1.0, "fear": 0.7, "urgency": 0.8
+            }
+        },
+        {
+            "text": "Exclusive presale access: invest before the token listing and lock in 5x apy. Doors close in 3 hours.",
+            "labels": {
+                "investment_context": 1.0, "reward_scarcity": 1.0, "urgency": 0.9, "financial_intent": 0.9, "scam_intent": 0.8
+            }
+        },
+        {
+            "text": "This is agent Johnson from Windows technical department. Your license expired and the system is at risk. Allow remote connection to renew it.",
+            "labels": {
+                "authority": 1.0, "tech_support_context": 1.0, "remote_access_request": 1.0, "fear": 0.9, "urgency": 0.8
+            }
+        },
+        {
+            "text": "Your KYC documents expired. Re-upload your ID and selfie on our portal to keep trading. Visit the secure link now.",
+            "labels": {
+                "urgency": 0.8, "credential_request": 0.9, "government_service_claim": 0.5, "phishing_intent": 0.8, "manipulation": 0.5
+            }
+        },
+        {
+            "text": "The court has scheduled a hearing regarding the case filed against your SSN. Confirm your details with the clerk to avoid a default judgment.",
+            "labels": {
+                "authority": 1.0, "government_service_claim": 1.0, "fear": 1.0, "urgency": 0.9, "credential_request": 0.7
+            }
+        },
+        {
+            "text": "Send 0.05 BTC to the wallet below within 48 hours or all your files will be encrypted and leaked.",
+            "labels": {
+                "fear": 1.0, "urgency": 1.0, "payment_request": 1.0, "manipulation": 1.0, "scam_intent": 1.0
+            }
+        },
+        {
+            "text": "You've earned 8,500 loyalty points which expire tonight. Redeem them now by confirming your account login.",
+            "labels": {
+                "reward_scarcity": 1.0, "urgency": 1.0, "credential_request": 0.9, "phishing_intent": 0.8
+            }
+        },
+        {
+            "text": "Local charity 5k run this Saturday — registration is free and open to everyone. See the community board for details.",
+            "labels": {}
+        },
+        {
+            "text": "Reminder: the team retrospective is moved to Thursday 10am. Agenda and notes are in the shared drive.",
+            "labels": {}
+        },
+        {
+            "text": "Your order #48291 has shipped and will arrive Tuesday. Track it from your account page when convenient.",
+            "labels": {}
+        },
+        {
+            "text": "Happy birthday! The crew is planning dinner on Friday, let us know which place you prefer.",
+            "labels": {}
+        },
+        {
+            "text": "The library book you reserved is ready for pickup at the front desk until Sunday.",
+            "labels": {}
+        },
+        {
+            "text": "Our meeting notes from today: launch date confirmed for March 3, budget approved, next sync on Monday.",
+            "labels": {}
+        },
+        {
+            "text": "Attached are the revised project requirements. Please review section 4 before the client call.",
+            "labels": {}
+        },
+        {
+            "text": "Your monthly statement is now available in online banking. No action is required.",
+            "labels": {}
+        },
+        {
+            "text": "Registration for the spring marathon closes next month; early-bird pricing applies until then.",
+            "labels": {}
+        },
+        {
+            "text": "The dentist confirmed your cleaning appointment for Wednesday at 3pm. Reply to reschedule if needed.",
+            "labels": {}
+        },
+        {
+            "text": "Thank you for contacting support. Your ticket #10543 has been resolved. Reply if you need further help.",
+            "labels": {}
+        },
+        {
+            "text": "School notice: parent-teacher conferences run next week; sign-up sheets are posted in the lobby.",
+            "labels": {}
+        },
+        {
+            "text": "Welcome to the course! Module 1 covers Python basics; exercises are due at the end of the week.",
+            "labels": {}
+        },
+        {
+            "text": "Flight reminder: check-in for tomorrow's trip opens 24 hours before departure in the airline app.",
+            "labels": {}
+        },
+        {
+            "text": "The hoa meeting minutes from April are attached for your review along with the treasurer's report.",
+            "labels": {}
+        },
+        {
+            "text": "Conference talk accepted! We'll need your slide deck two weeks before the event.",
+            "labels": {}
+        },
+        {
+            "text": "Your subscription renews on the 15th at the same rate; you can manage billing any time in settings.",
+            "labels": {}
+        },
+        {
+            "text": "The weather service issued a flood watch for low-lying areas through Saturday evening.",
+            "labels": {}
+        },
+        {
+            "text": "Great catching up at the reunion! Send photos whenever you get a chance.",
+            "labels": {}
+        },
+        {
+            "text": "The pharmacy confirms your prescription refill is ready; pick it up at the counter during store hours.",
+            "labels": {}
+        },
     ]
+
+
+def _tfm_version() -> str:
+    """Return the installed transformers version string (for diagnostics)."""
+    try:
+        import transformers
+
+        return transformers.__version__
+    except Exception:  # pragma: no cover - transformers is a hard requirement
+        return "unknown"
+
+
+def _load_tokenizer(model_name: str):
+    """Load the DeBERTa-v3 tokenizer, tolerating a protobuf-constrained environment.
+
+    The *fast* DeBERTa-v3 tokenizer converts the SentencePiece model via
+    ``sentencepiece_model_pb2``, whose generated code requires a protobuf runtime
+    >= the gencode version (7.36.1 for sentencepiece 0.2.x). Environments that must
+    keep ``protobuf<7`` (Streamlit, google-api-core, grpcio-status) cannot use it.
+
+    The *slow* tokenizer only needs ``sentencepiece`` itself, so we fall back to it.
+    Both produce identical token ids for DeBERTa-v3, so training results are the same.
+    """
+    from transformers import AutoTokenizer
+
+    try:
+        return AutoTokenizer.from_pretrained(model_name, use_fast=True)
+    except ImportError:
+        raise
+    except Exception as fast_err:
+        logger.warning(
+            "Fast tokenizer unavailable (%s). Falling back to the slow SentencePiece "
+            "tokenizer, which needs only 'sentencepiece' and no protobuf upgrade.",
+            fast_err,
+        )
+        try:
+            tok = AutoTokenizer.from_pretrained(model_name, use_fast=False)
+        except ImportError as e:
+            logger.error(
+                "Failed to load the DeBERTa-v3 tokenizer: %s\n"
+                "The tokenizer requires 'sentencepiece' (and a compatible 'protobuf' runtime).\n"
+                "Fix:  pip install -r ml/training/requirements.txt\n"
+                "      or:  pip install sentencepiece sentencepiece==0.1.99 'protobuf<7'",
+                e,
+            )
+            raise
+        logger.info("Using slow tokenizer %s (no protobuf dependency).", type(tok).__name__)
+        return tok
 
 
 def train(
@@ -119,6 +390,7 @@ def train(
     batch_size: int = 8,
     lr: float = 2e-5,
     small: bool = False,
+    out_dir: Path | str | None = None,
 ):
     """Fine-tune DeBERTa model on multi-label threat dataset."""
     logger.info("Initializing DeBERTa training pipeline...")
@@ -164,13 +436,13 @@ def train(
     else:
         logger.info("Using representative synthetic dataset (%s mode)", "small" if small else "fallback")
         synthetic = _make_synthetic_dataset()
-        # Expand for a few training iterations if in small mode
-        data_items = synthetic * (10 if small else 25)
+        # Expand for a few training iterations so the tokenizer sees enough steps
+        data_items = synthetic * (3 if small else 6)
 
     logger.info("Loaded %d training examples", len(data_items))
 
     # 2. Tokenizer & Model
-    tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+    tokenizer = _load_tokenizer(base_model_name)
     num_labels = len(SIGNAL_LABELS)
 
     model = AutoModelForSequenceClassification.from_pretrained(
@@ -179,6 +451,7 @@ def train(
         problem_type="multi_label_classification",
         id2label={i: name for i, name in enumerate(SIGNAL_LABELS)},
         label2id={name: i for i, name in enumerate(SIGNAL_LABELS)},
+        use_safetensors=False,
     )
     model.to(device)
 
@@ -238,6 +511,16 @@ def train(
             logits = outputs.logits
             loss = criterion(logits, labels)
 
+            if not math.isfinite(loss.item()):
+                raise RuntimeError(
+                    f"Non-finite loss ({loss.item()}) at epoch {epoch} step {step}. "
+                    "Training cannot recover from this. This is almost always an "
+                    "incompatible torch/transformers combination (e.g. transformers 5.x "
+                    "with a torch build it was not validated against). "
+                    "Use the pinned stack: pip install -r ml/training/requirements.txt "
+                    f"(currently torch {torch.__version__}, transformers {_tfm_version()})."
+                )
+
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -253,9 +536,11 @@ def train(
     logger.info("Training completed in %.1f seconds", elapsed)
 
     # 5. Save Artifacts
-    logger.info("Saving fine-tuned model and tokenizer to %s", ARTIFACT_DIR)
-    model.save_pretrained(ARTIFACT_DIR)
-    tokenizer.save_pretrained(ARTIFACT_DIR)
+    artifact_dir = Path(out_dir) if out_dir else ARTIFACT_DIR
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Saving fine-tuned model and tokenizer to %s", artifact_dir)
+    model.save_pretrained(artifact_dir)
+    tokenizer.save_pretrained(artifact_dir)
 
     # Metadata & Report
     meta = {
@@ -271,7 +556,7 @@ def train(
         "device": str(device),
     }
 
-    with open(ARTIFACT_DIR / "model.meta.json", "w", encoding="utf-8") as f:
+    with open(artifact_dir / "model.meta.json", "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
 
     report_md = f"""# DeBERTa Threat Model Training Report
@@ -286,7 +571,7 @@ def train(
 ## Production Usage
 Set `NLP_BACKEND=finetuned` in your `.env` file to activate this model in ThreatSense AI.
 """
-    with open(ARTIFACT_DIR / "REPORT.md", "w", encoding="utf-8") as f:
+    with open(artifact_dir / "REPORT.md", "w", encoding="utf-8") as f:
         f.write(report_md)
 
     logger.info("DeBERTa artifacts saved successfully. Ready for inference!")
@@ -299,6 +584,12 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=3, help="Training epochs")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size")
     parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Output directory for artifacts (default: ml/artifacts/nlp_model). "
+        "Use a separate dir for smoke tests so the production model is not overwritten.",
+    )
     args = parser.parse_args()
 
     train(
@@ -307,4 +598,5 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         lr=args.lr,
         small=args.small,
+        out_dir=args.out,
     )

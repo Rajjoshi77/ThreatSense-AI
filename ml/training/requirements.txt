@@ -1,0 +1,25 @@
+# Dependencies for ml/training/train_nlp_deberta.py and train_url_model.py
+# Install with:  pip install -r ml/training/requirements.txt
+#
+# IMPORTANT — protobuf compatibility
+# ----------------------------------
+# The DeBERTa-v3 *fast* tokenizer converts a SentencePiece model through
+# sentencepiece_model_pb2, which needs protobuf >= 7.36.1 for sentencepiece 0.2.x.
+# protobuf 7.x breaks Streamlit, google-api-core, grpcio-status and proto-plus
+# (all require protobuf < 7), so do NOT force it.
+#
+# train_nlp_deberta.py handles this: it tries the fast tokenizer and falls back to
+# the slow SentencePiece tokenizer, which needs only `sentencepiece`. Both produce
+# identical token ids, so results are the same. Keep protobuf < 7 in this project.
+#
+# torch: the PyPI wheel is CPU-only on Windows. For an NVIDIA GPU install from
+# https://download.pytorch.org/whl/cu121 first (see pytorch.org/get-started/locally/).
+
+torch>=2.2.0
+transformers>=4.45.0,<5
+accelerate>=0.30.0
+safetensors>=0.4.0
+sentencepiece==0.1.99
+protobuf>=4.25.8,<7
+datasets>=2.19.0
+numpy

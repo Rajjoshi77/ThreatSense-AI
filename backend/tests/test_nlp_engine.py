@@ -141,10 +141,51 @@ async def test_evidence_spans_populated():
 
 
 @pytest.mark.asyncio
-async def test_finetuned_backend_raises_not_implemented():
+async def test_finetuned_backend_uses_trained_model():
+    """With artifacts present (Stage 13+), the backend must classify, not raise."""
+    from app.engines.nlp.backends import finetuned as finetuned_mod
+
+    finetuned_mod._load_model.cache_clear()
+    if finetuned_mod._load_model() is None:
+        pytest.skip("fine-tuned artifacts not present; run ml/training/train_nlp_deberta.py")
+
     backend = FinetunedBackend()
-    with pytest.raises(NotImplementedError, match="Stage 13"):
-        await backend.analyze(PHISHING_EMAIL)
+    signals = await backend.analyze(PHISHING_EMAIL)
+
+    assert signals.backend_used == "finetuned"
+    assert signals.text_length == len(PHISHING_EMAIL)
+    # Every signal is a calibrated probability in [0, 1].
+    for field in (
+        "urgency",
+        "fear",
+        "authority",
+        "credential_request",
+        "phishing_intent",
+        "scam_intent",
+    ):
+        value = getattr(signals, field)
+        assert 0.0 <= value <= 1.0, f"{field}={value} outside [0, 1]"
+    # A phishing email must score higher on phishing than a benign business email.
+    benign = await backend.analyze(
+        "Hi team, the sprint review moved to Thursday. Notes are in the shared drive."
+    )
+    assert signals.phishing_intent > benign.phishing_intent
+
+
+@pytest.mark.asyncio
+async def test_finetuned_backend_raises_when_artifacts_missing(tmp_path, monkeypatch):
+    """Without artifacts, the backend must point the user at the training script."""
+    from app.engines.nlp.backends import finetuned as finetuned_mod
+
+    monkeypatch.setenv("NLP_FINETUNED_PATH", str(tmp_path))
+    finetuned_mod._load_model.cache_clear()
+    try:
+        backend = FinetunedBackend()
+        with pytest.raises(NotImplementedError, match="train_nlp_deberta"):
+            await backend.analyze(PHISHING_EMAIL)
+    finally:
+        monkeypatch.undo()
+        finetuned_mod._load_model.cache_clear()
 
 
 @pytest.mark.asyncio

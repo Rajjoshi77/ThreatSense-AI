@@ -401,5 +401,33 @@ npm run dev
 ```powershell
 cd backend
 .\.venv\Scripts\pytest.exe -q --tb=short
-# 398 passed in ~4s
+# 399 passed, 1 xpassed in ~80s (includes the DeBERTa NLP tests)
+```
+
+### 4. Train the DeBERTa NLP Model (optional)
+
+The fine-tuned backend is off by default (`NLP_BACKEND=rules`). To enable
+`NLP_BACKEND=finetuned` you need the model weights, which are gitignored
+(~542 MB). See [`ml/artifacts/nlp_model/README.md`](ml/artifacts/nlp_model/README.md).
+
+```powershell
+# from the repository root, using the interpreter you installed the ML stack into
+pip install -r ml/training/requirements.txt
+python ml/training/train_nlp_deberta.py --epochs 4          # full run
+python ml/training/train_nlp_deberta.py --small --epochs 1 --out .\tmp_model  # smoke test
+```
+
+- Artifacts land in `ml/artifacts/nlp_model/` by default; use `--out` to write elsewhere
+  so a smoke test never overwrites a trained model.
+- Train with `torch` 2.7.x + `transformers` 4.x. A `transformers` 5.x build produced
+  **NaN loss** in testing; the trainer aborts on non-finite loss rather than saving garbage.
+- The backend venv (`backend/.venv`) is for running the API and tests. Keep training in a
+  separate environment that satisfies `ml/training/requirements.txt`.
+
+Verify the model is actually being used:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -c "from app.core.config import settings; print(settings.NLP_BACKEND.value)"
+# finetuned
 ```

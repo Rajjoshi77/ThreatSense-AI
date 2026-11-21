@@ -46,6 +46,9 @@ ml/artifacts/**/*.pkl
 ml/artifacts/**/*.joblib
 ml/artifacts/**/*.bin
 ml/artifacts/**/*.safetensors
+# Generated tokenizer files (reproducible from the base model; see README.md there)
+ml/artifacts/nlp_model/tokenizer.json
+ml/artifacts/nlp_model/spm.model
 # Keep model cards and reports
 !ml/artifacts/**/REPORT.md
 !ml/artifacts/**/model_card.md
