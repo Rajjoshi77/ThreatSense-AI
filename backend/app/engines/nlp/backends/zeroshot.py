@@ -30,8 +30,8 @@ from app.schemas.schemas import NLPSignals
 
 logger = logging.getLogger(__name__)
 
-# HuggingFace model identifier
-_MODEL_ID = "facebook/bart-large-mnli"
+# HuggingFace model identifier (DeBERTa-v3 NLI or BART-large-MNLI)
+_MODEL_ID = os.getenv("NLP_ZEROSHOT_MODEL", "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli")
 _MAX_LENGTH = 512  # tokens
 
 # Hypothesis templates for each NLPSignals field
