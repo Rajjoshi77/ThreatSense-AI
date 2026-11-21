@@ -183,8 +183,9 @@ def train(
     model.to(device)
 
     # 3. PyTorch Dataset
+    max_len = 128 if small else 256
     class ThreatDataset(Dataset):
-        def __init__(self, items, tok, max_len=256):
+        def __init__(self, items, tok, max_len=max_len):
             self.items = items
             self.tok = tok
             self.max_len = max_len
@@ -212,7 +213,7 @@ def train(
                 "labels": target,
             }
 
-    dataset = ThreatDataset(data_items, tokenizer)
+    dataset = ThreatDataset(data_items, tokenizer, max_len=max_len)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
@@ -221,7 +222,7 @@ def train(
     criterion = torch.nn.BCEWithLogitsLoss()
 
     # 4. Training Loop
-    logger.info("Starting training loop (%d epochs, %d batches per epoch)...", epochs, len(loader))
+    logger.info("Starting training loop (%d epochs, %d batches per epoch, max_len=%d)...", epochs, len(loader), max_len)
     start_time = time.time()
     model.train()
 
@@ -243,9 +244,10 @@ def train(
             scheduler.step()
 
             total_loss += loss.item()
+            logger.info("  [Epoch %d/%d] Batch %d/%d — Batch Loss: %.4f", epoch, epochs, step, len(loader), loss.item())
 
         avg_loss = total_loss / len(loader)
-        logger.info("Epoch %d/%d — Avg Loss: %.4f", epoch, epochs, avg_loss)
+        logger.info("Epoch %d/%d Complete — Average Loss: %.4f", epoch, epochs, avg_loss)
 
     elapsed = time.time() - start_time
     logger.info("Training completed in %.1f seconds", elapsed)
