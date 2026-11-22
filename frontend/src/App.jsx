@@ -21,7 +21,7 @@ const SAMPLE_PRESETS = [
   },
   {
     type: 'url', title: 'Safe documentation URL', tag: 'safe', tagLabel: 'Baseline',
-    content: 'https://docs.example.test/guide',
+    content: 'https://www.iana.org/help/example-domains',
   },
   {
     type: 'email', title: 'Urgent credential-reset email', tag: 'malicious', tagLabel: 'Email',
@@ -81,6 +81,23 @@ function IconShield({ className, size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+  )
+}
+
+function IconSun({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
+    </svg>
+  )
+}
+
+function IconMoon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />
     </svg>
   )
 }
@@ -420,6 +437,13 @@ function EvidenceItem({ ev }) {
 // ── Main ThreatSense App ───────────────────────────────────────────────────────
 
 export default function App() {
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem('threatsense-theme') === 'dark' ? 'dark' : 'light'
+    } catch {
+      return 'light'
+    }
+  })
   const [artifactType, setArtifactType] = useState('url')
   const [content, setContent] = useState('')
   const [file, setFile] = useState(null)
@@ -434,6 +458,15 @@ export default function App() {
 
   const activeTypeObj = ARTIFACT_TYPES.find(t => t.id === artifactType) || ARTIFACT_TYPES[0]
   const isBinary = activeTypeObj.binary
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try {
+      localStorage.setItem('threatsense-theme', theme)
+    } catch {
+      // Theme still applies for this session when storage is unavailable.
+    }
+  }, [theme])
 
   // Cycle loading steps during active scan
   useEffect(() => {
@@ -622,6 +655,17 @@ export default function App() {
         </div>
 
         <div className="header-right">
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            aria-pressed={theme === 'dark'}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          >
+            {theme === 'dark' ? <IconSun /> : <IconMoon />}
+            <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+          </button>
           <div className="status-pill">
             <span className="status-dot" />
             <span>Engines Online</span>
