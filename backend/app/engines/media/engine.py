@@ -32,12 +32,10 @@ def _decode_qr_sync(image_bytes: bytes) -> list[str]:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         results = decode(img)
         return [r.data.decode("utf-8", errors="replace") for r in results]
-    except ImportError:
-        logger.debug("pyzbar/Pillow not installed — QR decode skipped")
-        return []
+    except ImportError as exc:
+        raise RuntimeError("pyzbar and Pillow are required for QR decoding") from exc
     except Exception as exc:
-        logger.warning("QR decode error: %s", exc)
-        return []
+        raise RuntimeError(f"QR decoder failed: {exc}") from exc
 
 
 def _ocr_sync(image_bytes: bytes) -> str:
@@ -54,12 +52,10 @@ def _ocr_sync(image_bytes: bytes) -> str:
         img = img.convert("RGB")
         text = pytesseract.image_to_string(img, timeout=10)
         return text.strip()
-    except ImportError:
-        logger.debug("pytesseract/Pillow not installed — OCR skipped")
-        return ""
+    except ImportError as exc:
+        raise RuntimeError("pytesseract and Pillow are required for OCR") from exc
     except Exception as exc:
-        logger.warning("OCR error: %s", exc)
-        return ""
+        raise RuntimeError(f"OCR failed: {exc}") from exc
 
 
 class MediaEngine:
@@ -74,7 +70,11 @@ class MediaEngine:
         if not artifact.raw_bytes:
             return []
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _decode_qr_sync, artifact.raw_bytes)
+        try:
+            return await loop.run_in_executor(None, _decode_qr_sync, artifact.raw_bytes)
+        except Exception as exc:
+            logger.warning("QR decode unavailable: %s", exc)
+            raise RuntimeError(f"QR decode unavailable: {exc}") from exc
 
     async def extract_text_ocr(self, artifact: Artifact) -> str:
         """Extract visible text from an image via OCR.
@@ -85,4 +85,8 @@ class MediaEngine:
         if not artifact.raw_bytes:
             return ""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _ocr_sync, artifact.raw_bytes)
+        try:
+            return await loop.run_in_executor(None, _ocr_sync, artifact.raw_bytes)
+        except Exception as exc:
+            logger.warning("OCR unavailable: %s", exc)
+            raise RuntimeError(f"OCR unavailable: {exc}") from exc

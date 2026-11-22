@@ -132,19 +132,41 @@ def test_email_engine_legit_no_mismatch():
 # ── Intel Engine ──────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_intel_engine_local_blocklist_domain():
+async def test_intel_engine_local_blocklist_domain(monkeypatch):
+    import app.engines.intel.engine as intel_module
     from app.engines.intel.engine import IntelEngine
-    engine = IntelEngine()
-    signals = await engine.lookup("phishing-example-test.xyz")
+
+    monkeypatch.setattr(
+        intel_module,
+        "_get_sets",
+        lambda: (frozenset({"malicious.test"}), frozenset(), frozenset(), frozenset()),
+    )
+    signals = await IntelEngine().lookup("malicious.test")
     assert any(h["source"] == "local_domains" for h in signals.hits)
 
 
 @pytest.mark.asyncio
-async def test_intel_engine_local_blocklist_url():
+async def test_intel_engine_local_blocklist_url(monkeypatch):
+    import app.engines.intel.engine as intel_module
     from app.engines.intel.engine import IntelEngine
-    engine = IntelEngine()
-    signals = await engine.lookup("http://phishing-example-test.xyz/login")
-    assert any(h["source"] in ("local_domains", "local_urls") for h in signals.hits)
+
+    indicator = "http://malicious.test/login"
+    monkeypatch.setattr(
+        intel_module,
+        "_get_sets",
+        lambda: (frozenset(), frozenset(), frozenset(), frozenset({indicator})),
+    )
+    signals = await IntelEngine().lookup(indicator)
+    assert any(h["source"] == "local_urls" for h in signals.hits)
+
+
+@pytest.mark.asyncio
+async def test_intel_engine_ignores_inactive_synthetic_fixture_entries():
+    from app.engines.intel.engine import IntelEngine
+
+    signals = await IntelEngine().lookup("phishing-example-test.xyz")
+
+    assert signals.hits == []
 
 
 @pytest.mark.asyncio
@@ -190,6 +212,37 @@ async def test_aggregator_single_malicious_detector():
     report = await agg.aggregate(artifact=artifact, results=results)
     assert report.risk_score > 20
     assert report.verdict in (Verdict.SUSPICIOUS, Verdict.LIKELY_MALICIOUS, Verdict.MALICIOUS)
+
+
+@pytest.mark.asyncio
+async def test_aggregator_unavailable_image_analysis_reports_unknown():
+    from app.aggregator.aggregator import RiskAggregator
+    from app.schemas.schemas import DetectionResult, Evidence, EvidenceSeverity
+
+    artifact = Artifact(type=ArtifactType.IMAGE, raw_content="")
+    results = [
+        DetectionResult(
+            detector_id="d22_screenshot_scam",
+            name="Screenshot Scam",
+            domain="Multimedia & Image-Based Threats",
+            domain_id="d5",
+            score=0.0,
+            verdict=Verdict.UNKNOWN,
+            confidence=0.6,
+            evidence=[Evidence(
+                source_engine="media",
+                severity=EvidenceSeverity.INFO,
+                description="OCR unavailable",
+                rule_id="media_ocr_unavailable",
+            )],
+            ran=True,
+        ),
+    ]
+
+    report = await RiskAggregator().aggregate(artifact=artifact, results=results)
+
+    assert report.risk_score == 0.0
+    assert report.verdict == Verdict.UNKNOWN
 
 
 @pytest.mark.asyncio

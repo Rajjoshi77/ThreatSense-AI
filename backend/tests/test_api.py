@@ -113,6 +113,51 @@ async def test_analyze_url_returns_risk_report(client) -> None:
     assert 0.0 <= data["risk_score"] <= 100.0
 
 
+async def test_analyze_benign_url_uses_url_detectors_without_message_nlp(client) -> None:
+    response = await client.post(
+        "/analyze",
+        json={"type": "url", "raw_content": "https://www.iana.org/help/example-domains"},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["risk_score"] < 25
+    assert data["nlp_backend_used"] == "not_applicable"
+    assert data["engine_signals"]["nlp"]["text_length"] == 0
+    url_domain = next(domain for domain in data["per_domain_scores"] if domain["domain_id"] == "d2")
+    d10 = next(detector for detector in url_domain["detectors"] if detector["detector_id"] == "d10_malicious_url")
+    assert d10["ran"]
+    assert "url_local_intel_hit" not in [e["rule_id"] for e in d10["evidence"]]
+
+
+async def test_analyze_threat_intel_hit_is_propagated_to_report(client, monkeypatch) -> None:
+    from app.engines.intel.engine import IntelEngine
+    from app.schemas.schemas import IntelSignals
+
+    async def lookup(_self, indicator: str) -> IntelSignals:
+        hits = [{"source": "test_fixture", "indicator": "malicious.test"}]
+        return IntelSignals(
+            hits=hits if "malicious.test" in indicator else [],
+            providers_queried=["test_fixture"],
+            offline_mode=True,
+        )
+
+    monkeypatch.setattr(IntelEngine, "lookup", lookup)
+    response = await client.post(
+        "/analyze",
+        json={"type": "url", "raw_content": "https://malicious.test/login"},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["risk_score"] >= 80
+    assert data["engine_signals"]["intel"]["hits"]
+    d2 = next(domain for domain in data["per_domain_scores"] if domain["domain_id"] == "d2")
+    d10 = next(detector for detector in d2["detectors"] if detector["detector_id"] == "d10_malicious_url")
+    assert d10["verdict"] == "malicious"
+    assert any(e["rule_id"] == "url_local_intel_hit" for e in d10["evidence"])
+
+
 async def test_analyze_email_returns_risk_report(client) -> None:
     """POST /analyze with an email artifact must return a valid RiskReport."""
     email_text = (
@@ -130,6 +175,24 @@ async def test_analyze_email_returns_risk_report(client) -> None:
     assert data["artifact_type"] == "email"
 
 
+async def test_analyze_webpage_includes_base_and_extracted_url_signals(client) -> None:
+    html = (
+        '<html><head><title>Library</title><script>"urgent credential"</script></head>'
+        '<body><h1>Library hours</h1><a href="https://docs.python.org/3/">Docs</a></body></html>'
+    )
+    response = await client.post("/analyze", json={"type": "webpage", "raw_content": html})
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    d2 = next(domain for domain in data["per_domain_scores"] if domain["domain_id"] == "d2")
+    d10 = next(detector for detector in d2["detectors"] if detector["detector_id"] == "d10_malicious_url")
+    assert d10["ran"]
+    assert "https://docs.python.org/3/" in d10["metadata"]["urls_analyzed"]
+    assert data["engine_signals"]["url"]["url"] == "https://docs.python.org/3/"
+    assert data["nlp_backend_used"] == "rules"
+    assert data["engine_signals"]["nlp"]["text_length"] == len("Library Library hours Docs")
+
+
 async def test_analyze_sms_returns_risk_report(client) -> None:
     """POST /analyze with an SMS artifact must return a valid RiskReport."""
     resp = await client.post(
@@ -142,6 +205,76 @@ async def test_analyze_sms_returns_risk_report(client) -> None:
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["artifact_type"] == "sms"
+
+
+async def test_analyze_image_without_ocr_reports_unknown(client) -> None:
+    from pathlib import Path
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    image_path = Path(__file__).resolve().parents[2] / "frontend/public/sample-vectors/benign-screenshot.png"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as api:
+        response = await api.post(
+            "/analyze",
+            data={"type": "image"},
+            files={"file": ("benign-screenshot.png", image_path.read_bytes(), "image/png")},
+        )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["verdict"] == "unknown"
+    assert data["nlp_backend_used"] == "not_applicable"
+    assert any(evidence["rule_id"] == "media_ocr_unavailable" for evidence in data["top_evidence"])
+
+
+async def test_analyze_qr_payload_is_routed_through_url_detectors(client) -> None:
+    from pathlib import Path
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    qr_path = Path(__file__).resolve().parents[2] / "frontend/public/sample-vectors/sample-quishing.png"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as api:
+        response = await api.post(
+            "/analyze",
+            data={"type": "qr"},
+            files={"file": ("sample-quishing.png", qr_path.read_bytes(), "image/png")},
+        )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["nlp_backend_used"] == "not_applicable"
+    assert data["engine_signals"]["nlp"]["text_length"] == 0
+    assert data["verdict"] == "safe"
+    d2 = next(domain for domain in data["per_domain_scores"] if domain["domain_id"] == "d2")
+    d10 = next(detector for detector in d2["detectors"] if detector["detector_id"] == "d10_malicious_url")
+    assert d10["ran"]
+    assert "https://account-check.example.test/verify?sample=1" in d10["metadata"]["urls_analyzed"]
+    d5 = next(domain for domain in data["per_domain_scores"] if domain["domain_id"] == "d5")
+    qr_detector = next(detector for detector in d5["detectors"] if detector["detector_id"] == "d21_qr_phishing")
+    assert "qr_contains_url" in [e["rule_id"] for e in qr_detector["evidence"]]
+
+
+async def test_analyze_plain_text_qr_reports_unknown(client) -> None:
+    from pathlib import Path
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    qr_path = Path(__file__).resolve().parents[2] / "frontend/public/sample-vectors/sample-plain-qr.png"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as api:
+        response = await api.post(
+            "/analyze",
+            data={"type": "qr"},
+            files={"file": ("sample-plain-qr.png", qr_path.read_bytes(), "image/png")},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["verdict"] == "unknown"
 
 
 async def test_analyze_report_includes_per_domain_scores(client) -> None:

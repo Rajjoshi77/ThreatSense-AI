@@ -3,11 +3,5 @@
 # Format: one domain per line, no http:// prefix
 # Updated: see ml/data/README.md for download instructions
 #
-# Examples (synthetic safe data for CI):
-phishing-example-test.xyz
-malware-test-domain.tk
-scam-example.ml
-fake-paypal-login.cf
-sbi-fraud-site.ga
-verify-account-evil.top
-income-tax-refund-scam.pw
+# Synthetic CI fixtures intentionally not active as threat intelligence.
+# Add only sourced, reviewed indicators here; see ml/data/README.md.

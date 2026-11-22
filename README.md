@@ -15,7 +15,7 @@ The backend is built with FastAPI and Python; the dashboard uses React and Vite.
 - **Storage:** SQLite by default for local development; PostgreSQL is configured for Docker Compose.
 - **Optional integrations:** QR decoding and image OCR use the system packages listed below. Live URLhaus checks can be enabled with `INTEL_OFFLINE=false`.
 
-The application defaults to fine-tuned DeBERTa and uses it whenever a compatible checkpoint is configured. If model weights are missing or inference fails, analysis continues with the rules backend and reports which backend actually ran. Supply weights in `ml/artifacts/nlp_model/` or configure `NLP_FINETUNED_PATH`. Set `NLP_BACKEND=rules` to choose rules directly. URL analysis independently uses a transparent rule-based fallback when its optional trained URL model is unavailable. See [ML notes](#machine-learning-notes).
+The application defaults to fine-tuned DeBERTa. It loads a checkpoint only when training provenance is readable and identifies human-labeled data; the checked-in synthetic prototype is deliberately skipped. If valid weights are missing or inference fails, analysis uses rules and reports the backend that actually ran. URL analysis likewise skips models without reviewed production provenance and uses transparent structural rules. The bundled threat-list samples are synthetic CI fixtures, not active intelligence indicators. See [ML notes](#machine-learning-notes).
 
 ## Detector inventory
 
@@ -66,7 +66,7 @@ $env:NLP_FINETUNED_PATH = "C:\\path\\to\\trained\\checkpoint"
 uvicorn app.main:app --reload --port 8000
 ```
 
-The checkpoint directory must contain the trained model weights and tokenizer files. For a private Hugging Face model, set `NLP_FINETUNED_PATH` to its model ID and provide `HF_TOKEN` to the API process. When model loading or inference fails, the API logs a warning and uses the rules backend until a valid checkpoint is available.
+A local checkpoint directory must contain trained weights, tokenizer files, and a `model.meta.json` whose `training_data` is `human_labeled`; unverified or synthetic checkpoints are skipped. For a Hugging Face model, set `NLP_FINETUNED_PATH` to its `owner/model` ID and include the same provenance metadata in the repository. A private model also requires `HF_TOKEN`. If loading or inference fails, the API logs a warning and uses the rules backend.
 
 QR decoding and screenshot OCR are optional. For those features, install Tesseract and ZBar on the host:
 
@@ -181,16 +181,16 @@ Backend settings are read from environment variables and an optional `.env` file
 | `INTEL_OFFLINE` | Set to `false` to enable the optional live URLhaus lookup |
 | `VITE_API_URL` | Frontend API base URL, set in the frontend environment |
 
-The bundled threat-intelligence lists are in `backend/app/engines/intel/data/`. When `INTEL_OFFLINE=false`, the backend sends analyzed URLs to URLhaus for lookup; consider this privacy implication before enabling live checks.
+Threat-intelligence list locations are in `backend/app/engines/intel/data/`; synthetic CI fixture rows are intentionally not active blocklist indicators. Configure only sourced, reviewed feeds before relying on local matches. When `INTEL_OFFLINE=false`, the backend sends analyzed URLs to URLhaus for lookup; consider this privacy implication before enabling live checks.
 
 ## Machine-learning notes
 
 - **Default mode:** `NLP_BACKEND=finetuned`. If its checkpoint is missing, inference fails, or the container memory limit is below `NLP_MIN_MEMORY_MB` (default 1536 MiB), the service uses rules and the analysis report identifies `rules` as the backend that ran. This allows the API to start within small memory limits such as Render's 512 MiB free instance; DeBERTa requires a larger instance. Set `NLP_BACKEND=rules` to select rules directly.
-- **URL model:** The application uses URL-feature heuristics when `ml/artifacts/url_model/model.joblib` is absent. The committed URL model report describes a small synthetic CI model, not a production-validated model.
+- **URL model:** A URL classifier is loaded only when its metadata identifies reviewed `production` training. Missing metadata or synthetic/unknown modes are skipped; structural rule-based scoring is the fallback and is a triage score, not a calibrated probability.
 - **Zero-shot NLP:** `NLP_BACKEND=zeroshot` requires the optional Transformers stack and model availability; `NLP_ZEROSHOT=true` enables model loading. Without it, the backend falls back to rules.
-- **Fine-tuned NLP:** Training code and notes live under `ml/`. The checkpoint weights are not included in Git; the checked-in config/tokenizer metadata alone cannot run inference. To use a model, place the complete trained checkpoint in `ml/artifacts/nlp_model/`, or set `NLP_FINETUNED_PATH` to a local checkpoint directory or Hugging Face model ID. A private Hugging Face repository also requires `HF_TOKEN` in the runtime environment. If the fine-tuned checkpoint is unavailable, the service logs a warning and falls back to rules rather than rejecting startup or returning a false successful DeBERTa result.
-- **Training quality:** The committed model metadata describes a small synthetic bootstrap training run, not a production-validated model. The training script requires at least 50 human-labeled examples for a normal run; its `--small` synthetic smoke-test mode requires a separate output directory and must not be used in production. The script does not provide held-out evaluation, so evaluate on a separate human-reviewed dataset before deployment.
-- **Training data:** `ml/data/README.md` explains the intended data sources. Review dataset licences and label quality before training or using a model in production.
+- **Fine-tuned NLP:** Training code and notes live under `ml/`. The checkpoint weights are not included in Git. A complete local or Hugging Face checkpoint must provide readable `model.meta.json` provenance with `training_data: human_labeled`; unknown or synthetic provenance is rejected. Configure `NLP_FINETUNED_PATH` for local or Hub checkpoints, and `HF_TOKEN` for private Hub access. If a suitable checkpoint is unavailable, the service falls back to rules and reports the effective backend.
+- **Training quality:** The committed NLP metadata describes an unvalidated synthetic prototype and the local URL-model report describes synthetic CI data; neither is enabled as a production classifier. NLP training requires at least 50 reviewed examples with source and human annotator provenance. The `--small` synthetic mode requires a separate output directory. Independently evaluate any candidate on a representative, human-reviewed holdout before deployment. Software tests and smoke checks are not accuracy measurements.
+- **Training data and intelligence:** `ml/data/README.md` explains intended sources. Synthetic examples in the bundled intel lists are inactive; only sourced, reviewed indicators should be configured. Review dataset licences and label quality before operational use.
 
 ## Repository layout
 

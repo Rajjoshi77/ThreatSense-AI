@@ -2,6 +2,5 @@
 # Sources: URLhaus CSV, PhishTank
 # Format: one full URL per line
 #
-# Synthetic test entries only:
-http://phishing-example-test.xyz/login
-http://malware-test-domain.tk/payload.exe
+# Synthetic test fixtures intentionally not active as threat intelligence.
+# Add only sourced, reviewed indicators here; see ml/data/README.md.

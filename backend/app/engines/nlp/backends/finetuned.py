@@ -10,6 +10,7 @@ or inference fails, transparently falls back to the deterministic rules backend.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from functools import lru_cache
@@ -89,6 +90,12 @@ def _load_model() -> tuple[Any, Any] | None:
     model_source = configured_source or str(_DEFAULT_ARTIFACT_DIR)
     model_path = Path(model_source).expanduser()
     is_local_checkpoint = model_path.is_dir()
+    hub_model_id = (
+        model_source.count("/") == 1
+        and not model_source.startswith((".", "~"))
+        and not model_path.is_absolute()
+        and "\\" not in model_source
+    )
     looks_like_local_path = (
         model_path.is_absolute()
         or model_source.startswith((".", "~"))
@@ -99,16 +106,57 @@ def _load_model() -> tuple[Any, Any] | None:
         logger.warning("Configured local DeBERTa checkpoint directory does not exist: %s", model_path)
         return None
 
+    if not (is_local_checkpoint or hub_model_id):
+        logger.warning(
+            "Skipping DeBERTa checkpoint reference %r; expected an existing local directory "
+            "or a Hugging Face owner/model ID.",
+            model_source,
+        )
+        return None
+
+    hf_token = os.getenv("HF_TOKEN")
     if is_local_checkpoint:
+        metadata_path = model_path / "model.meta.json"
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "Skipping DeBERTa checkpoint without readable training provenance at %s: %s",
+                metadata_path,
+                exc,
+            )
+            return None
+
         has_weights = any((model_path / filename).is_file() for filename in _WEIGHT_FILENAMES)
         has_weights = has_weights or any(model_path.glob("model-*.safetensors"))
         has_weights = has_weights or any(model_path.glob("pytorch_model-*.bin"))
         if not has_weights:
             logger.warning("No fine-tuned model weights found in %s", model_path)
             return None
-    elif not configured_source:
-        # Do not mistake the checked-in config/tokenizer metadata for trained weights.
-        logger.info("No fine-tuned checkpoint configured; expected model weights in %s", model_path)
+    else:
+        try:
+            from huggingface_hub import hf_hub_download
+
+            metadata_path = Path(hf_hub_download(
+                repo_id=model_source,
+                filename="model.meta.json",
+                token=hf_token,
+            ))
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(
+                "Skipping Hugging Face DeBERTa checkpoint without readable training provenance: %s",
+                exc,
+            )
+            return None
+
+    training_data = str(metadata.get("training_data", "")).lower()
+    if training_data != "human_labeled":
+        logger.warning(
+            "Skipping DeBERTa checkpoint with unverified training provenance (%s); "
+            "using rules NLP fallback.",
+            training_data or "missing metadata",
+        )
         return None
 
     try:
@@ -116,7 +164,6 @@ def _load_model() -> tuple[Any, Any] | None:
         from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer
 
         load_options = {"local_files_only": is_local_checkpoint}
-        hf_token = os.getenv("HF_TOKEN")
         if hf_token:
             load_options["token"] = hf_token
         logger.info("Loading fine-tuned DeBERTa model from %s", model_source)

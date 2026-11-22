@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from app.core.registry import register_detector
 from app.detectors.base import BaseDetector
@@ -58,6 +59,29 @@ class MaliciousURLDetector(BaseDetector):
             signals = await ctx.get_url_signals(url)
         except Exception as exc:
             return self._error(artifact, str(exc))
+
+        intel_indicators = [url]
+        hostname = urlparse(url).hostname
+        if hostname:
+            intel_indicators.extend([hostname, hostname.lower().rstrip(".")])
+        intel_hits: list[dict] = []
+        for indicator in dict.fromkeys(intel_indicators):
+            intel_hits.extend((await ctx.get_intel_signals(indicator)).hits)
+        if intel_hits:
+            return self._result(
+                artifact,
+                1.0,
+                Verdict.MALICIOUS,
+                [Evidence(
+                    source_engine="intel",
+                    severity=EvidenceSeverity.CRITICAL,
+                    description="URL or host matches a local known-threat indicator",
+                    matched_text=url[:120],
+                    rule_id="url_local_intel_hit",
+                    metadata={"hits": intel_hits},
+                )],
+                signals=["intel.local_blocklist", "url.risk_score"],
+            )
 
         risk = signals.risk_score or 0.0
         elapsed_ms = (time.perf_counter() - t0) * 1000

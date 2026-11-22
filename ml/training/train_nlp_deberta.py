@@ -31,7 +31,7 @@ import logging
 import math
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Setup paths
@@ -342,7 +342,7 @@ def _tfm_version() -> str:
         import transformers
 
         return transformers.__version__
-    except Exception:  # pragma: no cover - transformers is a hard requirement
+    except Exception:  # pragma: no cover - optional diagnostics only  # noqa: BLE001
         return "unknown"
 
 
@@ -363,7 +363,7 @@ def _load_tokenizer(model_name: str):
         return AutoTokenizer.from_pretrained(model_name, use_fast=True)
     except ImportError:
         raise
-    except Exception as fast_err:
+    except Exception as fast_err:  # noqa: BLE001 - retry with slow tokenizer on library failures
         logger.warning(
             "Fast tokenizer unavailable (%s). Falling back to the slow SentencePiece "
             "tokenizer, which needs only 'sentencepiece' and no protobuf upgrade.",
@@ -410,10 +410,9 @@ def train(
         from torch.utils.data import DataLoader, Dataset
         from transformers import (
             AutoModelForSequenceClassification,
-            AutoTokenizer,
             get_linear_schedule_with_warmup,
         )
-    except ImportError as e:
+    except ImportError:
         logger.error(
             "Missing PyTorch or HuggingFace Transformers. Install via:\n"
             "    pip install torch transformers datasets accelerate"
@@ -446,7 +445,12 @@ def train(
         data_items = []
         with gold_csv.open("r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
-            required_columns = {"text", *(f"label_{signal}" for signal in SIGNAL_LABELS)}
+            required_columns = {
+                "text",
+                "source",
+                "annotator",
+                *(f"label_{signal}" for signal in SIGNAL_LABELS),
+            }
             missing_columns = required_columns - set(reader.fieldnames or [])
             if missing_columns:
                 raise ValueError(
@@ -457,6 +461,26 @@ def train(
                 text = (row.get("text") or "").strip()
                 if not text:
                     continue
+
+                source = (row.get("source") or "").strip().lower()
+                annotator = (row.get("annotator") or "").strip().lower()
+                provenance = f"{source} {annotator}"
+                if not source or not annotator:
+                    raise ValueError(
+                        f"CSV row {row_number} must include reviewed source and annotator provenance"
+                    )
+                if any(marker in provenance for marker in (
+                    "synthetic", "bootstrap", "_make_synthetic_dataset", "train_nlp_deberta"
+                )):
+                    raise ValueError(
+                        f"CSV row {row_number} is marked synthetic/generated ({provenance!r}); "
+                        "synthetic examples cannot be used as human-reviewed training data"
+                    )
+                if not annotator.startswith("human:") or not annotator.removeprefix("human:").strip():
+                    raise ValueError(
+                        f"CSV row {row_number} has no verifiable human-review annotator "
+                        f"({annotator!r}); use an explicit value such as 'human:reviewer-name'"
+                    )
 
                 labels = {}
                 for signal in SIGNAL_LABELS:
@@ -594,7 +618,7 @@ def train(
         "base_model": base_model_name,
         "num_labels": num_labels,
         "labels": SIGNAL_LABELS,
-        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "trained_at": datetime.now(UTC).isoformat(),
         "epochs": epochs,
         "batch_size": batch_size,
         "learning_rate": lr,

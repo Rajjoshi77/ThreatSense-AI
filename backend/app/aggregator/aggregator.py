@@ -23,6 +23,7 @@ from datetime import datetime
 
 from app.schemas.schemas import (
     Artifact,
+    ArtifactType,
     DetectionResult,
     DomainBreakdown,
     EngineSignals,
@@ -222,6 +223,21 @@ class RiskAggregator:
 
         risk_score_100 = round(raw_score * 100, 2)
         verdict = _verdict_from_score(risk_score_100)
+        if (
+            artifact.type in (ArtifactType.IMAGE, ArtifactType.QR)
+            and risk_score_100 < 25
+            and any(
+                result.ran
+                and any(
+                    evidence.rule_id in {
+                        "qr_not_decoded", "qr_non_url_payload", "media_ocr_unavailable"
+                    }
+                    for evidence in result.evidence
+                )
+                for result in results
+            )
+        ):
+            verdict = Verdict.UNKNOWN
 
         # ── 5. Top evidence (deduplicated, severity-sorted) ───────────────────
         seen_descs: set[str] = set()

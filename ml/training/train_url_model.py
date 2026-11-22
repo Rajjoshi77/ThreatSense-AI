@@ -50,7 +50,7 @@ def _make_synthetic_dataset() -> tuple:
     The model trained on it will have poor generalization.
     Use download_url_data.py + real training for production.
     """
-    from app.engines.url.features import URLFeatures, extract_features
+    from app.engines.url.features import extract_features
 
     benign_urls = [
         "https://www.google.com/search?q=python+tutorial",
@@ -159,7 +159,6 @@ def _make_synthetic_dataset() -> tuple:
         "https://verify-account-securely.online/paypal/billing/update",
     ]
 
-    from app.engines.url.features import extract_features
 
     X, y = [], []
     for url in benign_urls:
@@ -261,7 +260,7 @@ def _domain_aware_split(X: list, y: list, urls: list[str] | None = None) -> tupl
     # Assign each sample to train or test based on domain hash
     test_indices, train_indices = [], []
     for i, url in enumerate(urls):
-        domain_hash = int(hashlib.md5(url.encode()).hexdigest(), 16)  # noqa: S324
+        domain_hash = int(hashlib.md5(url.encode(), usedforsecurity=False).hexdigest(), 16)
         if domain_hash % 10 < 2:  # 20% test
             test_indices.append(i)
         else:
@@ -276,11 +275,10 @@ def _domain_aware_split(X: list, y: list, urls: list[str] | None = None) -> tupl
 
 
 def train(small: bool = False) -> None:
-    import json
-
     import joblib
     import numpy as np
-    from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+    from app.engines.url.features import URLFeatures
+    from sklearn.calibration import CalibratedClassifierCV
     from sklearn.metrics import (
         average_precision_score,
         classification_report,
@@ -290,8 +288,6 @@ def train(small: bool = False) -> None:
     )
     from sklearn.model_selection import train_test_split
     from xgboost import XGBClassifier
-
-    from app.engines.url.features import URLFeatures
 
     feature_names = URLFeatures.feature_names()
 
@@ -358,7 +354,7 @@ def train(small: bool = False) -> None:
     median_latency_ms = float(np.median(latencies))
     p99_latency_ms = float(np.percentile(latencies, 99))
 
-    print(f"\nMetrics:")
+    print("\nMetrics:")
     print(f"  ROC-AUC:      {roc_auc:.4f}")
     print(f"  PR-AUC:       {pr_auc:.4f}")
     print(f"  F1 (macro):   {f1_macro:.4f}")
@@ -378,6 +374,7 @@ def train(small: bool = False) -> None:
     meta = {
         "version": version,
         "mode": mode_label,
+        "training_data": "synthetic_ci" if small else "PhiUSIIL+Tranco",
         "feature_names": feature_names,
         "n_features": len(feature_names),
         "train_samples": len(y_train_np),
@@ -428,6 +425,8 @@ def _write_report(meta: dict, mode_label: str, small: bool) -> None:
 
 ## Overview
 XGBoost classifier (CalibratedClassifierCV with Platt scaling) trained on URL structural features.
+
+The runtime loads this model only when the artifact metadata reports `mode: production`; synthetic and missing provenance use the documented structural fallback instead.
 {warning}
 ## Training Data
 

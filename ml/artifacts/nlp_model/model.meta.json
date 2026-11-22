@@ -1,6 +1,6 @@
 {
   "model_type": "deberta_multilabel_threat",
-  "training_data": "human_labeled",
+  "training_data": "synthetic_bootstrap",
   "base_model": "microsoft/deberta-v3-small",
   "num_labels": 15,
   "labels": [

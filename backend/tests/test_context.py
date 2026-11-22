@@ -126,6 +126,70 @@ async def test_engine_failure_handled_gracefully() -> None:
     assert "nlp" in failures
 
 
+async def test_url_content_is_not_sent_to_message_nlp() -> None:
+    """URL artifacts must be analyzed by URL detectors, not NLP message labels."""
+    artifact = Artifact(type=ArtifactType.URL, raw_content="https://example.com/login")
+    ctx = AnalysisContext(artifact=artifact, nlp_engine=NLPEngine(backend=CountingBackend()))
+
+    signals = await ctx.get_nlp_signals()
+
+    assert signals.backend_used == "not_applicable"
+    assert signals.text_length == 0
+    assert ctx.get_engine_call_count("nlp") == 1
+
+
+async def test_nlp_signals_snapshot_combines_intel_indicators() -> None:
+    from app.schemas.schemas import IntelSignals
+
+    class IntelProvider:
+        async def lookup(self, indicator: str) -> IntelSignals:
+            return IntelSignals(
+                hits=[{"indicator": indicator}] if indicator == "bad.test" else [],
+                providers_queried=["local_blocklist"],
+                offline_mode=True,
+            )
+
+    artifact = Artifact(type=ArtifactType.URL, raw_content="https://bad.test")
+    ctx = AnalysisContext(artifact=artifact, intel_provider=IntelProvider())
+
+    await ctx.get_intel_signals("bad.test")
+    await ctx.get_intel_signals("clean.test")
+    snapshot = ctx.get_engine_signals_snapshot()
+
+    assert snapshot.intel is not None
+    assert snapshot.intel.hits == [{"indicator": "bad.test"}]
+    assert snapshot.intel.providers_queried == ["local_blocklist"]
+    assert snapshot.intel.offline_mode
+
+
+async def test_webpage_html_markup_is_not_sent_to_message_nlp() -> None:
+    """Webpage NLP sees visible page text, not HTML attributes or script source."""
+    html = (
+        '<html><body><form action="https://example.net/login">'
+        '<input type="password" name="password">'
+        '<script>var alert = "verify your account now";</script>'
+        "</form></body></html>"
+    )
+    artifact = Artifact(type=ArtifactType.WEBPAGE, raw_content=html)
+    ctx = AnalysisContext(artifact=artifact, nlp_engine=NLPEngine(backend=CountingBackend()))
+
+    signals = await ctx.get_nlp_signals()
+
+    assert signals.backend_used == "counting"
+    assert signals.text_length == 0
+
+
+async def test_explicit_ocr_text_can_use_nlp_on_image_artifact() -> None:
+    """Extracted OCR text is analyzed even though image bytes are not prose."""
+    artifact = Artifact(type=ArtifactType.IMAGE, raw_content="")
+    ctx = AnalysisContext(artifact=artifact, nlp_engine=NLPEngine(backend=CountingBackend()))
+
+    signals = await ctx.get_nlp_signals("Text found in screenshot")
+
+    assert signals.backend_used == "counting"
+    assert signals.text_length == len("Text found in screenshot")
+
+
 async def test_no_nlp_engine_returns_empty_signals() -> None:
     """When no NLP engine is provided, get_nlp_signals() returns zeroed NLPSignals."""
     artifact = Artifact(type=ArtifactType.URL, raw_content="http://example.com")

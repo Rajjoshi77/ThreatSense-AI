@@ -13,6 +13,7 @@ This module NEVER trains — training lives in ``ml/training/train_url_model.py`
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -45,27 +46,33 @@ def load_model() -> Any | None:
 
     _model_loaded = True
 
-    if not _MODEL_PATH.exists():
-        logger.info(
-            "URL model not found at %s — using rule-based fallback. "
-            "Run `make train-url-model` to build the real model.",
-            _MODEL_PATH,
-        )
-        return None
-
     try:
+        meta_path = _MODEL_PATH.with_suffix(".meta.json")
+        if not meta_path.is_file():
+            logger.warning(
+                "Skipping URL model without training provenance at %s; using structural rules fallback.",
+                meta_path,
+            )
+            return None
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        mode = str(metadata.get("mode", "")).lower()
+        if mode != "production":
+            logger.warning(
+                "Skipping URL model with unverified training mode %r; using structural rules fallback.",
+                mode or "missing metadata",
+            )
+            return None
+        if not _MODEL_PATH.is_file():
+            logger.info("URL model not found at %s; using structural rules fallback.", _MODEL_PATH)
+            return None
+
         import joblib
 
         pipeline = joblib.load(_MODEL_PATH)
         _model = pipeline
 
-        # Try to read model version from companion metadata file
-        meta_path = _MODEL_PATH.with_suffix(".meta.json")
-        if meta_path.exists():
-            import json
-
-            meta = json.loads(meta_path.read_text())
-            _model_version = meta.get("version", "unknown")
+        if metadata:
+            _model_version = metadata.get("version", "unknown")
 
         logger.info("URL model loaded from %s (version=%s)", _MODEL_PATH, _model_version)
     except Exception as exc:
@@ -159,41 +166,41 @@ def _predict_with_model(
 
 
 # ── Rule-based fallback scorer ────────────────────────────────────────────────
-# Weights calibrated to approximate model decision boundaries.
-# Values > 0 → phishing signal; < 0 → benign signal.
+# Conservative, hand-authored weights for offline structural triage.
+# These are not calibrated probabilities; independent evaluation is outstanding.
 
 _RULE_WEIGHTS: list[float] = [
-    0.004,   # url_length
-    0.008,   # domain_length (longer domains more suspicious)
-    0.05,    # subdomain_count
-    0.002,   # digit_count
-    0.005,   # special_char_count
-    0.04,    # entropy
-    0.03,    # param_count
-    0.02,    # path_depth
-    -0.15,   # is_https (https = safer, negative weight)
-    0.30,    # is_ip_host (big signal)
-    0.20,    # has_punycode
-    0.06,    # suspicious_token_count
-    0.25,    # tld_risk
-    0.25,    # has_at_sign
-    0.10,    # double_slash_in_path
-    0.10,    # has_hex_encoding
-    0.15,    # is_shortener
-    0.12,    # path_has_exe
-    0.05,    # fragment_present
-    0.03,    # dash_count
-    0.002,   # token_length_max
-    0.003,   # dot_count
-    0.10,    # has_redirect_param
-    0.0,     # domain_age_days (network, often -1 → ignored)
+    0.001,   # url_length (weak; length alone is not malicious)
+    0.002,   # domain_length (weak; length alone is not malicious)
+    0.08,    # subdomain_count
+    0.005,   # digit_count
+    0.006,   # special_char_count
+    0.0,     # entropy (weakly discriminative and noisy on its own)
+    0.025,   # param_count
+    0.015,   # path_depth
+    -0.12,   # is_https (weak contextual signal only)
+    1.25,    # is_ip_host
+    0.75,    # has_punycode
+    0.18,    # suspicious_token_count
+    0.60,    # tld_risk
+    0.80,    # has_at_sign
+    0.20,    # double_slash_in_path
+    0.25,    # has_hex_encoding
+    0.12,    # is_shortener (not proof of maliciousness)
+    0.30,    # path_has_exe
+    0.015,   # fragment_present
+    0.035,   # dash_count
+    0.001,   # token_length_max
+    0.002,   # dot_count
+    0.40,    # has_redirect_param
+    0.0,     # domain_age_days (network, often -1 — ignored)
     0.0,     # dns_a_count
     0.0,     # dns_mx_present
     0.0,     # dns_ns_count
     0.0,     # dns_ttl
 ]
 
-_RULE_BIAS = -0.5  # Logistic offset so score starts near 0.1 for neutral URLs
+_RULE_BIAS = -2.4  # Low benign baseline; high scores require multiple risk indicators
 
 
 def _predict_rule_based(

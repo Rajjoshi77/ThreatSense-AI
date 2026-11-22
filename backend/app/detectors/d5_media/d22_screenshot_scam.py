@@ -35,11 +35,24 @@ class ScreenshotScamDetector(BaseDetector):
         ocr_text = await ctx.get_media_ocr_text()
 
         if not ocr_text.strip():
-            return self._result(artifact, 0.0, Verdict.SAFE,
-                                [Evidence(source_engine="media", severity=EvidenceSeverity.INFO,
-                                    description="No text found in image via OCR",
-                                    rule_id="media_ocr_empty")],
-                                signals=["media.ocr"])
+            failure = ctx.get_failures().get("media:ocr")
+            description = (
+                f"Image OCR was unavailable: {failure}"
+                if failure
+                else "No text was extracted from the image; this does not establish that it is safe"
+            )
+            return self._result(
+                artifact,
+                0.0,
+                Verdict.UNKNOWN,
+                [Evidence(
+                    source_engine="media",
+                    severity=EvidenceSeverity.INFO,
+                    description=description,
+                    rule_id="media_ocr_unavailable",
+                )],
+                signals=["media.ocr"],
+            )
 
         evidence: list[Evidence] = []
         evidence.append(Evidence(source_engine="media", severity=EvidenceSeverity.INFO,
@@ -47,11 +60,7 @@ class ScreenshotScamDetector(BaseDetector):
             matched_text=ocr_text[:120], rule_id="media_ocr_text"))
 
         # Analyse extracted text with NLP engine
-        if ctx._nlp_engine:
-            nlp = await ctx._nlp_engine.analyze(ocr_text)
-        else:
-            from app.engines.nlp.backends.rules import RulesBackend
-            nlp = await RulesBackend().analyze(ocr_text)
+        nlp = await ctx.get_nlp_signals(ocr_text)
 
         score = 0.0
         if nlp.phishing_intent >= 0.25:

@@ -36,6 +36,7 @@ from app.schemas.schemas import (
     Artifact,
     ArtifactType,
     DetectionResult,
+    IntelSignals,
     RiskReport,
     Verdict,
 )
@@ -49,9 +50,10 @@ _explainer  = Explainer()
 # ── Normalizer dispatch ───────────────────────────────────────────────────────
 
 _TEXT_NORMALIZERS: dict[ArtifactType, object] = {
-    ArtifactType.URL:   URLNormalizer(),
-    ArtifactType.EMAIL: EmailNormalizer(),
-    ArtifactType.SMS:   SMSNormalizer(),
+    ArtifactType.URL:     URLNormalizer(),
+    ArtifactType.EMAIL:   EmailNormalizer(),
+    ArtifactType.SMS:     SMSNormalizer(),
+    ArtifactType.WEBPAGE: WebpageNormalizer(),
 }
 
 _BINARY_NORMALIZERS: dict[ArtifactType, object] = {
@@ -136,10 +138,101 @@ async def _run_pipeline(artifact: Artifact, db: AsyncSession) -> RiskReport:
             intel_provider=IntelEngine(),
         )
 
+        # ── Collect every URL in URL-bearing artifacts ───────────────────────
+        from app.input.normalizers.url import URLNormalizer
+
+        url_candidates: list[Artifact] = []
+        if artifact.type == ArtifactType.URL:
+            url_candidates.append(artifact)
+        elif artifact.type == ArtifactType.WEBPAGE and artifact.normalized_url:
+            url_candidates.append(URLNormalizer().normalize(artifact.normalized_url))
+        extracted_urls = list(artifact.extracted_urls)
+        if artifact.type in (ArtifactType.QR, ArtifactType.IMAGE):
+            try:
+                payloads = await ctx.get_media_qr_payloads()
+                from app.input.normalizers.utils import extract_urls
+
+                for payload in payloads:
+                    extracted_urls.extend(extract_urls(payload))
+                if artifact.type == ArtifactType.IMAGE:
+                    ocr_text = await ctx.get_media_ocr_text()
+                    extracted_urls.extend(extract_urls(ocr_text))
+            except Exception as exc:
+                logger.warning("Could not extract image/QR URLs for URL-detector routing: %s", exc)
+
+        for extracted_url in extracted_urls:
+            candidate = URLNormalizer().normalize(extracted_url)
+            if candidate.normalized_url and not any(
+                candidate.normalized_url == existing.normalized_url
+                for existing in url_candidates
+            ):
+                url_candidates.append(candidate)
+
         # ── Detector loop ─────────────────────────────────────────────────────
         detection_results: list[DetectionResult] = []
+        url_contexts = [
+            AnalysisContext(
+                artifact=url_artifact,
+                url_engine=ctx._url_engine,
+                intel_provider=ctx._intel_provider,
+            )
+            for url_artifact in url_candidates
+        ]
 
         for detector in get_all_detectors():
+            if detector.domain_id == "d2":
+                if not url_candidates:
+                    detection_results.append(detector._skipped(artifact))
+                    skipped.append(detector.detector_id)
+                    continue
+
+                per_url_results: list[DetectionResult] = []
+                for url_artifact, url_ctx in zip(url_candidates, url_contexts, strict=True):
+                    try:
+                        per_url_results.append(await detector.detect(url_artifact, url_ctx))
+                    except Exception as exc:
+                        logger.exception(
+                            "Detector %s raised for URL %s",
+                            detector.detector_id,
+                            (url_artifact.normalized_url or "")[:100],
+                        )
+                        per_url_results.append(DetectionResult(
+                            detector_id=detector.detector_id,
+                            name=detector.name,
+                            domain=detector.domain,
+                            domain_id=detector.domain_id,
+                            score=0.0,
+                            verdict=Verdict.ERROR,
+                            confidence=0.0,
+                            error=f"{type(exc).__name__}: {exc}",
+                            ran=True,
+                        ))
+
+                best_result = max(
+                    per_url_results,
+                    key=lambda result: (
+                        result.verdict not in (Verdict.ERROR, Verdict.UNKNOWN),
+                        result.score,
+                    ),
+                )
+                evidence_by_key = {
+                    (item.rule_id, item.description): item
+                    for result in per_url_results
+                    for item in result.evidence
+                }
+                detection_results.append(best_result.model_copy(update={
+                    "evidence": list(evidence_by_key.values()),
+                    "metadata": {
+                        **best_result.metadata,
+                        "urls_analyzed": [item.normalized_url for item in url_candidates if item.normalized_url],
+                    },
+                }))
+                continue
+
+            if artifact.type == ArtifactType.URL and detector.domain_id in {"d1", "d3"}:
+                detection_results.append(detector._skipped(artifact))
+                skipped.append(detector.detector_id)
+                continue
             if not detector.accepts(artifact.type):
                 detection_results.append(detector._skipped(artifact))
                 skipped.append(detector.detector_id)
@@ -174,9 +267,38 @@ async def _run_pipeline(artifact: Artifact, db: AsyncSession) -> RiskReport:
             skipped.append("d12_chain_resolution_offline")
 
         engine_signals = ctx.get_engine_signals_snapshot()
+        if url_contexts:
+            candidate_snapshots = [url_ctx.get_engine_signals_snapshot() for url_ctx in url_contexts]
+            intel_snapshots = [snapshot.intel for snapshot in candidate_snapshots if snapshot.intel]
+            candidate_intel_hits = [
+                hit
+                for snapshot in candidate_snapshots
+                if snapshot.intel
+                for hit in snapshot.intel.hits
+            ]
+            best_url = max(
+                (snapshot.url for snapshot in candidate_snapshots if snapshot.url is not None),
+                key=lambda signals: signals.risk_score or 0.0,
+                default=engine_signals.url,
+            )
+            engine_signals = engine_signals.model_copy(update={
+                "url": best_url,
+                "intel": IntelSignals(
+                    hits=candidate_intel_hits,
+                    providers_queried=list(dict.fromkeys(
+                        provider for signals in intel_snapshots for provider in signals.providers_queried
+                    )),
+                    providers_failed=list(dict.fromkeys(
+                        provider for signals in intel_snapshots for provider in signals.providers_failed
+                    )),
+                    offline_mode=all(signals.offline_mode for signals in intel_snapshots),
+                ) if intel_snapshots else engine_signals.intel,
+            })
         actual_nlp_backend = (
             engine_signals.nlp.backend_used
             if engine_signals.nlp is not None
+            else "not_applicable"
+            if artifact.type in (ArtifactType.URL, ArtifactType.QR, ArtifactType.IMAGE)
             else settings.NLP_BACKEND.value
         )
         report = await _aggregator.aggregate(

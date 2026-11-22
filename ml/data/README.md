@@ -67,6 +67,8 @@ Stratified train/validation/test split **by registered domain** to prevent data 
 
 ---
 
+The analyzer does not load the domain, URL, IP, or hash blocklist entries shipped with earlier builds: those entries were explicitly synthetic CI fixtures and are not real threat intelligence. The files are retained as documentation placeholders; add only reviewed, sourced indicators when operational threat feeds are configured.
+
 ## NLP Datasets (Stages 4, 7, 13)
 
 | Dataset | Stage | Source | Licence | Login |
@@ -82,7 +84,6 @@ Download scripts TBD for each stage.
 
 ## Gold Labels (Stage 13)
 
-The file `ml/data/gold_labels_template.csv` is the labeling template for human annotation.
-The filled file `ml/data/gold_labels.csv` must be provided by the user before Stage 13.
+The file `ml/data/gold_labels_template.csv` is the labeling template for human annotation. Normal training requires at least 50 reviewed examples in `ml/data/gold_labels.csv`, including `source` and `annotator` provenance columns and all 15 signal labels. Each `annotator` value must explicitly indicate human review (for example `human:reviewer-name`); synthetic fixture records are rejected.
 
-**Never fabricate labels.** Every example must be hand-labeled or verified by a human.
+**Never fabricate labels.** Every example must be hand-labeled or verified by a human. The checked-in `gold_labels.csv` records synthetic bootstrap provenance and is not eligible for training.

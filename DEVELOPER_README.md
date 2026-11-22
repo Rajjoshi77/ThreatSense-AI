@@ -144,7 +144,7 @@ ThreatSenseAI/
 │   │   └── schemas/
 │   │       └── schemas.py              # Pydantic schemas (Artifact, DetectionResult, RiskReport)
 │   ├── alembic/                        # Database migration scripts
-│   ├── tests/                          # Complete pytest suite (398+ unit/integration tests)
+│   ├── tests/                          # Backend unit/integration suite (418 tests)
 │   └── pyproject.toml                  # Backend package dependencies and configuration
 ├── frontend/
 │   ├── src/
@@ -401,14 +401,14 @@ npm run dev
 ```powershell
 cd backend
 .\.venv\Scripts\pytest.exe -q --tb=short
-# 399 passed, 1 xpassed in ~80s (includes the DeBERTa NLP tests)
+# 416 passed, 1 skipped, 1 xpassed (software tests; not a detection-accuracy evaluation)
 ```
 
 ### 4. Train the DeBERTa NLP Model (optional)
 
-The application defaults to `NLP_BACKEND=finetuned` and uses a complete trained checkpoint when available (weights are gitignored, ~542 MB). If weights are missing, inference fails, or the container memory cap is below `NLP_MIN_MEMORY_MB` (default 1536 MiB), startup and analysis continue with the rules backend and reports identify the backend actually used. `/health` reports the effective backend. See [`ml/artifacts/nlp_model/README.md`](ml/artifacts/nlp_model/README.md).
+The application defaults to `NLP_BACKEND=finetuned`, but only uses a checkpoint with readable metadata declaring human-labeled training provenance. The checked-in synthetic prototype is deliberately skipped; checkpoints without compatible weights or with insufficient container memory also fall back to rules. Reports identify the backend used, and `/health` reports availability. See [`ml/artifacts/nlp_model/README.md`](ml/artifacts/nlp_model/README.md).
 
-Normal training requires at least 50 human-reviewed examples in `ml/data/gold_labels.csv`:
+Normal training requires at least 50 human-reviewed examples in `ml/data/gold_labels.csv`, each with a source and an `annotator` value explicitly indicating human review (for example `human:reviewer-name`):
 
 ```powershell
 # from the repository root, using the interpreter you installed the ML stack into
@@ -421,10 +421,13 @@ python ml/training/train_nlp_deberta.py --small --epochs 1 --out .\tmp_model
 ```
 
 - Normal training saves artifacts to `ml/artifacts/nlp_model/`; deploy via a local
-  checkpoint or set `NLP_FINETUNED_PATH` to a Hugging Face model ID. Set `HF_TOKEN`
-  as a secret for a private repository.
-- Synthetic smoke-test weights must not be used in production and cannot overwrite the
-  default checkpoint directory.
+  checkpoint or set `NLP_FINETUNED_PATH` to a Hugging Face model ID. Hub model
+  repositories need a `model.meta.json` with `training_data: human_labeled`. Set
+  `HF_TOKEN` as a secret for private repository access.
+- Synthetic examples and smoke-test weights cannot be used as production checkpoints.
+  Smoke-test output must not overwrite the default checkpoint directory. Synthetic CI
+  entries in bundled threat-intelligence lists are also inactive; add only sourced,
+  reviewed threat indicators.
 - Train with `torch` 2.7.x + `transformers` 4.x. A `transformers` 5.x build produced
   **NaN loss** in testing; the trainer aborts on non-finite loss rather than saving garbage.
 - The backend venv (`backend/.venv`) is for running the API and tests. Keep training in a

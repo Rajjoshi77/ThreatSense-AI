@@ -34,9 +34,11 @@ python ml/training/train_nlp_deberta.py --epochs 4
 ```
 
 That writes model weights, `config.json`, tokenizer files and `model.meta.json`
-into this directory. DeBERTa mode uses these weights when present; if they are
-missing or inference fails, the API logs a warning and continues with the rules
-backend. Analysis responses identify the backend actually used.
+into this directory. Normal checkpoints identify `training_data` as
+`human_labeled`; local checkpoints without readable provenance or with any other
+provenance are deliberately rejected. If a compatible checkpoint is unavailable
+or inference fails, the API logs a warning and continues with the rules backend.
+Analysis responses identify the backend actually used.
 
 For deployment without copying a large checkpoint into the application image,
 host the complete trained checkpoint in a Hugging Face repository and set
@@ -77,9 +79,11 @@ NLP_FINETUNED_PATH=owner/model-repository
 HF_TOKEN=your-private-token-if-required
 ```
 
-Use a model trained with this project's `SIGNAL_LABELS` order. The serving
-backend checks the configured checkpoint for 15 outputs and matching labels.
-Do not commit access tokens or large model weights to Git.
+Use a model trained with this project's `SIGNAL_LABELS` order and human-reviewed
+examples with verified provenance. The serving backend checks for provenance,
+15 outputs, and matching labels. Hub repositories must include `model.meta.json`
+with `training_data: human_labeled`. Do not commit access tokens or large model
+weights to Git.
 
 ## Environment notes
 

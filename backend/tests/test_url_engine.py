@@ -52,6 +52,22 @@ def test_benign_url_has_valid_features() -> None:
     assert feats.path_depth == 1
 
 
+def test_url_model_skips_synthetic_ci_checkpoint(tmp_path, monkeypatch) -> None:
+    import json
+
+    from app.engines.url import model as url_model
+
+    model_path = tmp_path / "model.joblib"
+    model_path.with_suffix(".meta.json").write_text(
+        json.dumps({"mode": "synthetic_ci"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(url_model, "_MODEL_PATH", model_path)
+    monkeypatch.setattr(url_model, "_model", None)
+    monkeypatch.setattr(url_model, "_model_loaded", False)
+
+    assert url_model.load_model() is None
+
+
 def test_feature_vector_length_is_stable() -> None:
     feats = extract_features("https://example.com")
     vector = feats.to_vector()
@@ -241,8 +257,13 @@ async def test_engine_empty_url_returns_empty_signals() -> None:
 @pytest.mark.asyncio
 async def test_engine_benign_scores_low() -> None:
     engine = URLEngine()
-    benign = await engine.analyze("https://www.google.com/search?q=python")
-    assert benign.risk_score < 0.5
+    for url in (
+        "https://www.google.com/search?q=python",
+        "https://www.iana.org/help/example-domains",
+        "https://docs.python.org/3/library/pathlib.html",
+    ):
+        benign = await engine.analyze(url)
+        assert benign.risk_score < 0.35, f"{url} scored {benign.risk_score}"
 
 
 @pytest.mark.asyncio
@@ -253,6 +274,7 @@ async def test_engine_malicious_scores_higher_than_benign() -> None:
         "http://192.168.1.1/paypal-login/verify.php?user=victim@bank.com"
     )
     assert malicious.risk_score > benign.risk_score
+    assert malicious.risk_score >= 0.5
 
 
 @pytest.mark.asyncio

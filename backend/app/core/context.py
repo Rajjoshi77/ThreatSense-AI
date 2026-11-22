@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from typing import Any
@@ -91,9 +92,16 @@ class AnalysisContext:
 
     # ── Engine accessors (lazy, cached) ──────────────────────────────────────
 
-    async def get_nlp_signals(self) -> NLPSignals:
-        """Return NLP signals for the artifact's text content (cached)."""
-        return await self._get_or_compute("nlp", self._compute_nlp)
+    async def get_nlp_signals(self, text: str | None = None) -> NLPSignals:
+        """Return cached NLP signals for artifact text or an extracted text payload."""
+        if text is None:
+            return await self._get_or_compute("nlp", self._compute_nlp)
+        import hashlib
+
+        digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+        return await self._get_or_compute(
+            f"nlp:text:{digest}", lambda: self._compute_nlp(text)
+        )
 
     async def get_url_signals(self, url: str | None = None) -> URLSignals:
         """Return URL feature signals (cached per-artifact URL)."""
@@ -137,18 +145,40 @@ class AnalysisContext:
 
     def get_engine_signals_snapshot(self) -> EngineSignals:
         """Build an EngineSignals object from whatever is currently cached."""
+        nlp = self._cache.get("nlp") or next(
+            (value for key, value in self._cache.items() if key.startswith("nlp:text:")),
+            None,
+        )
+        from app.schemas.schemas import ArtifactType
+
+        if nlp is None and self._artifact.type in (
+            ArtifactType.URL, ArtifactType.QR, ArtifactType.IMAGE
+        ):
+            nlp = NLPSignals(backend_used="not_applicable", text_length=0)
+        intel_signals = [
+            value
+            for key, value in self._cache.items()
+            if key.startswith("intel:") and isinstance(value, IntelSignals)
+        ]
+        intel = IntelSignals(
+            hits=[hit for signals in intel_signals for hit in signals.hits],
+            providers_queried=list(dict.fromkeys(
+                provider for signals in intel_signals for provider in signals.providers_queried
+            )),
+            providers_failed=list(dict.fromkeys(
+                provider for signals in intel_signals for provider in signals.providers_failed
+            )),
+            offline_mode=all(signals.offline_mode for signals in intel_signals),
+        ) if intel_signals else None
         return EngineSignals(
-            nlp=self._cache.get("nlp"),
+            nlp=nlp,
             url=next(
                 (v for k, v in self._cache.items() if k.startswith("url:") and isinstance(v, URLSignals)),
                 self._cache.get("url"),
             ),
             web=self._cache.get("web"),
             email=self._cache.get("email"),
-            intel=next(
-                (v for k, v in self._cache.items() if k.startswith("intel:") and isinstance(v, IntelSignals)),
-                None,
-            ),
+            intel=intel,
         )
 
     # ── Core caching primitive ────────────────────────────────────────────────
@@ -186,10 +216,32 @@ class AnalysisContext:
 
     # ── Private compute helpers (stubs; filled in by later stages) ────────────
 
-    async def _compute_nlp(self) -> NLPSignals:
+    async def _compute_nlp(self, text: str | None = None) -> NLPSignals:
         if self._nlp_engine is None:
             return NLPSignals()
-        text = self._artifact.raw_content or ""
+
+        from app.schemas.schemas import ArtifactType
+
+        artifact = self._artifact
+        explicit_text = text is not None
+        if not explicit_text and artifact.type in (ArtifactType.URL, ArtifactType.QR, ArtifactType.IMAGE):
+            return NLPSignals(backend_used="not_applicable", text_length=0)
+
+        text = artifact.raw_content or "" if text is None else text
+        if not explicit_text and artifact.type == ArtifactType.WEBPAGE and re.match(r"^\s*<", text):
+            try:
+                from bs4 import BeautifulSoup
+
+                soup = BeautifulSoup(text[:500 * 1024], "html.parser")
+                for element in soup(("script", "style", "noscript", "template")):
+                    element.decompose()
+                text = soup.get_text(separator=" ", strip=True)
+            except Exception as exc:
+                logger.warning("Could not extract visible webpage text for NLP: %s", exc)
+                text = ""
+
+        # URL destinations are scored by the URL detectors, not as message prose.
+        text = re.sub(r"https?://[^\s<>]+", " ", text, flags=re.IGNORECASE)
         return await self._nlp_engine.analyze(text)
 
     async def _compute_url(self, url: str | None) -> URLSignals:
@@ -237,4 +289,8 @@ class AnalysisContext:
             return EmailSignals()
         if key.startswith("intel:"):
             return IntelSignals(offline_mode=True)
+        if key == "media:qr":
+            return []
+        if key == "media:ocr":
+            return ""
         return None

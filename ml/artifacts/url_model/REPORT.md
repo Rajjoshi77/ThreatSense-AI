@@ -3,6 +3,8 @@
 ## Version
 `20260929_142658` | Mode: `synthetic_ci`
 
+> The backend skips this synthetic CI model even if `model.joblib` is present. It uses structural fallback scoring until a model with reviewed production provenance is independently evaluated.
+
 ## Overview
 XGBoost classifier (CalibratedClassifierCV with Platt scaling) trained on URL structural features.
 

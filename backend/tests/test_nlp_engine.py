@@ -147,7 +147,7 @@ async def test_finetuned_backend_uses_trained_model():
 
     finetuned_mod._load_model.cache_clear()
     if finetuned_mod._load_model() is None:
-        pytest.skip("fine-tuned artifacts not present; run ml/training/train_nlp_deberta.py")
+        pytest.skip("validated fine-tuned artifacts unavailable; using rules fallback")
 
     backend = FinetunedBackend()
     signals = await backend.analyze(PHISHING_EMAIL)
@@ -193,6 +193,10 @@ async def test_finetuned_backend_falls_back_to_rules_when_artifacts_missing(tmp_
     """Without a checkpoint, DeBERTa mode returns rules signals rather than failing."""
     from app.engines.nlp.backends import finetuned as finetuned_mod
 
+    (tmp_path / "model.meta.json").write_text(
+        '{"training_data":"synthetic_bootstrap"}', encoding="utf-8"
+    )
+    (tmp_path / "model.safetensors").touch()
     monkeypatch.setenv("NLP_FINETUNED_PATH", str(tmp_path))
     finetuned_mod._load_model.cache_clear()
     try:
@@ -202,6 +206,23 @@ async def test_finetuned_backend_falls_back_to_rules_when_artifacts_missing(tmp_
         assert signals.phishing_intent > 0
     finally:
         monkeypatch.undo()
+        finetuned_mod._load_model.cache_clear()
+
+
+def test_finetuned_model_rejects_missing_or_unverified_provenance(tmp_path, monkeypatch):
+    from app.engines.nlp.backends import finetuned as finetuned_mod
+
+    monkeypatch.setenv("NLP_FINETUNED_PATH", str(tmp_path))
+    (tmp_path / "model.safetensors").touch()
+    finetuned_mod._load_model.cache_clear()
+    try:
+        assert finetuned_mod._load_model() is None
+        (tmp_path / "model.meta.json").write_text(
+            '{"training_data":"synthetic_smoke_test"}', encoding="utf-8"
+        )
+        finetuned_mod._load_model.cache_clear()
+        assert finetuned_mod._load_model() is None
+    finally:
         finetuned_mod._load_model.cache_clear()
 
 

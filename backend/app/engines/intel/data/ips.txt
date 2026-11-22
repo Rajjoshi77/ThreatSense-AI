@@ -1,8 +1,3 @@
 # Known malicious IP blocklist
-# Sources: Spamhaus, abuse.ch
-# Format: one IP per line
-#
-# Synthetic test entries only:
-198.51.100.1
-203.0.113.99
-192.0.2.200
+# Add only sourced, reviewed indicators from an operational threat feed.
+# Documentation-range synthetic fixtures are intentionally not active indicators.
