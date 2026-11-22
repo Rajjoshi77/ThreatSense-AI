@@ -27,14 +27,23 @@ Fine-tuned multi-label classifier for the 15 `NLPSignals` consumed by the NLP en
 
 ```powershell
 # from the repository root
+cp ml/data/gold_labels_template.csv ml/data/gold_labels.csv
+# Fill gold_labels.csv with at least 50 human-reviewed examples, then:
 pip install -r ml/training/requirements.txt
 python ml/training/train_nlp_deberta.py --epochs 4
 ```
 
-That writes `model.safetensors`, `config.json`, the tokenizer files and
-`model.meta.json` into this directory. Until the weights exist,
-`FinetunedBackend` raises `NotImplementedError` telling you to run the script —
-`NLP_BACKEND=rules` keeps working meanwhile.
+That writes model weights, `config.json`, tokenizer files and `model.meta.json`
+into this directory. DeBERTa mode uses these weights when present; if they are
+missing or inference fails, the API logs a warning and continues with the rules
+backend. Analysis responses identify the backend actually used.
+
+For deployment without copying a large checkpoint into the application image,
+host the complete trained checkpoint in a Hugging Face repository and set
+`NLP_FINETUNED_PATH=owner/model-repository`. For private repositories, also set
+`HF_TOKEN` as a secret. Keep `NLP_BACKEND=finetuned`; the API verifies the
+checkpoint's 15-label configuration and label order when it starts. If loading
+fails, it continues with rules until the checkpoint is fixed and the API restarted.
 
 If you do need the weights in the repo, use Git LFS:
 
@@ -50,6 +59,28 @@ git add .gitattributes
 - `model.meta.json` — base model, epochs, lr, device, training time
 - `REPORT.md` — human-readable training report (regenerated on every run)
 
+## Use the fine-tuned backend
+
+Local checkpoint:
+
+```bash
+# Set from the backend working directory before starting Uvicorn
+NLP_BACKEND=finetuned
+NLP_FINETUNED_PATH=/absolute/path/to/nlp_model
+```
+
+Hugging Face Hub checkpoint:
+
+```bash
+NLP_BACKEND=finetuned
+NLP_FINETUNED_PATH=owner/model-repository
+HF_TOKEN=your-private-token-if-required
+```
+
+Use a model trained with this project's `SIGNAL_LABELS` order. The serving
+backend checks the configured checkpoint for 15 outputs and matching labels.
+Do not commit access tokens or large model weights to Git.
+
 ## Environment notes
 
 - Train with a stack that was validated together: `torch` 2.7.x + `transformers` 4.x.
@@ -58,6 +89,7 @@ git add .gitattributes
 - The DeBERTa-v3 fast tokenizer needs `protobuf >= 7.36.1` for `sentencepiece` 0.2.x,
   which breaks Streamlit. The trainer therefore falls back to the slow SentencePiece
   tokenizer, so `protobuf < 7` works fine.
-- Accuracy is limited by the synthetic bootstrap set. Fill
-  `ml/data/gold_labels_template.csv` with real labelled samples and retrain to get a
-  production-grade classifier.
+- The committed metadata records a historical synthetic bootstrap run; it is not a
+  production checkpoint. Normal training now requires at least 50 human-labeled rows
+  in `ml/data/gold_labels.csv`. The optional `--small` mode is only a synthetic smoke
+  test and requires a separate `--out` directory.

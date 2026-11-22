@@ -2,8 +2,9 @@
 
 - **Base Model:** `microsoft/deberta-v3-small`
 - **Task:** 15-Signal Multi-Label Cyber Threat Classification
-- **Trained At:** 2026-11-21T15:07:31.104853+00:00
-- **Training Time:** 1529.9s (cpu)
+- **Trained At:** 2026-11-22T06:50:55.507306+00:00
+- **Training Time:** 258.1s (cpu)
+- **Training Data:** human_labeled
 - **Signals Output:**
   - `urgency`
   - `fear`
@@ -22,4 +23,7 @@
   - `remote_access_request`
 
 ## Production Usage
-Set `NLP_BACKEND=finetuned` in your `.env` file to activate this model in ThreatSense AI.
+Set `NLP_BACKEND=finetuned` and configure `NLP_FINETUNED_PATH` to activate a
+trained checkpoint in ThreatSense AI.
+
+

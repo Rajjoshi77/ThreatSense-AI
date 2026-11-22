@@ -5,7 +5,10 @@ Acceptance criteria:
   ✓ GET /health returns 200 with status='ok' and detector_count=22.
   ✓ GET /detectors returns 22 detectors across 5 domains (9/5/3/3/2).
   ✓ POST /analyze with a URL artifact returns a valid RiskReport.
-  ✓ POST /analyze with NLP_BACKEND=finetuned returns a report (fallback to rules).
+  ✓ POST /analyze returns a rules-backed report if finetuned weights are missing.
+
+The test configuration forces NLP_BACKEND=rules in conftest.py; individual
+finetuned-mode behavior is tested explicitly below.
   ✓ GET /analyses/{id} returns the stored report.
 """
 
@@ -58,6 +61,26 @@ async def test_detectors_all_have_required_fields(client) -> None:
             assert det["accepted_artifact_types"], (
                 f"No accepted_artifact_types for {det['detector_id']}"
             )
+
+
+async def test_analyze_uses_rules_fallback_when_finetuned_checkpoint_is_missing(client, monkeypatch) -> None:
+    """Finetuned mode stays available with rules when checkpoint weights are absent."""
+    from app.core.config import NLPBackend, settings
+    from app.engines.nlp.backends import finetuned as finetuned_backend
+
+    monkeypatch.setattr(settings, "NLP_BACKEND", NLPBackend.FINETUNED)
+    monkeypatch.setattr(finetuned_backend, "_load_model", lambda: None)
+    response = await client.post(
+        "/analyze",
+        json={
+            "type": "sms",
+            "raw_content": "URGENT: verify your password and OTP immediately at this link.",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["nlp_backend_used"] == "rules"
+    assert response.json()["engine_signals"]["nlp"]["backend_used"] == "rules"
 
 
 async def test_analyze_url_returns_risk_report(client) -> None:

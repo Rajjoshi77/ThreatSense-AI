@@ -11,6 +11,8 @@ from enum import StrEnum
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
 class NLPBackend(StrEnum):
     """Selectable NLP signal backends."""
 
@@ -45,10 +47,16 @@ class Settings(BaseSettings):
 
     # ── NLP Engine ───────────────────────────────────────────────────────────
     NLP_BACKEND: NLPBackend = Field(
-        default=NLPBackend.RULES,
+        default=NLPBackend.FINETUNED,
         description=(
             "Signal backend: rules | zeroshot | finetuned | ensemble. "
-            "'finetuned' raises NotImplementedError until Stage 13."
+            "Fine-tuned mode prefers a trained 15-label checkpoint and falls back to rules when unavailable."
+        ),
+    )
+    NLP_FINETUNED_PATH: str = Field(
+        default="",
+        description=(
+            "Local checkpoint directory or Hugging Face Hub model ID for the fine-tuned NLP backend."
         ),
     )
 

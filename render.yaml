@@ -13,9 +13,12 @@ services:
       - key: DATABASE_URL
         value: sqlite+aiosqlite:///threatsense.db
       - key: NLP_BACKEND
-        value: rules
-      - key: NLP_ZEROSHOT
-        value: "false"
+        value: finetuned
+      # Configure this to a private/public Hugging Face model ID with the trained checkpoint.
+      - key: NLP_FINETUNED_PATH
+        sync: false
+      - key: HF_TOKEN
+        sync: false
       - key: INTEL_OFFLINE
         value: "false"
       # Allow requests from any origin in production to avoid Render URL mismatch

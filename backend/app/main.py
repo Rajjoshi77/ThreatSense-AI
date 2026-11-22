@@ -106,6 +106,14 @@ async def on_startup() -> None:
     detector_count = len(get_all_detectors())
     logger.info("Detector registry loaded: %d detectors | %s", detector_count, registry_stats())
 
+    if settings.NLP_BACKEND.value == "finetuned":
+        from app.engines.nlp.backends.finetuned import ensure_model_loaded
+
+        if ensure_model_loaded():
+            logger.info("Fine-tuned DeBERTa backend is ready")
+        else:
+            logger.warning("Using rules NLP fallback until a trained DeBERTa checkpoint is configured")
+
     # Auto-create tables for SQLite (dev mode); Postgres uses alembic upgrade head
     if "sqlite" in settings.DATABASE_URL:
 

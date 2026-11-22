@@ -142,7 +142,7 @@ async def test_evidence_spans_populated():
 
 @pytest.mark.asyncio
 async def test_finetuned_backend_uses_trained_model():
-    """With artifacts present (Stage 13+), the backend must classify, not raise."""
+    """With trained checkpoint weights present, the backend must run DeBERTa inference."""
     from app.engines.nlp.backends import finetuned as finetuned_mod
 
     finetuned_mod._load_model.cache_clear()
@@ -173,19 +173,42 @@ async def test_finetuned_backend_uses_trained_model():
 
 
 @pytest.mark.asyncio
-async def test_finetuned_backend_raises_when_artifacts_missing(tmp_path, monkeypatch):
-    """Without artifacts, the backend must point the user at the training script."""
+async def test_finetuned_backend_falls_back_to_rules_when_artifacts_missing(tmp_path, monkeypatch):
+    """Without a checkpoint, DeBERTa mode returns rules signals rather than failing."""
     from app.engines.nlp.backends import finetuned as finetuned_mod
 
     monkeypatch.setenv("NLP_FINETUNED_PATH", str(tmp_path))
     finetuned_mod._load_model.cache_clear()
     try:
         backend = FinetunedBackend()
-        with pytest.raises(NotImplementedError, match="train_nlp_deberta"):
-            await backend.analyze(PHISHING_EMAIL)
+        signals = await backend.analyze(PHISHING_EMAIL)
+        assert signals.backend_used == "rules"
+        assert signals.phishing_intent > 0
     finally:
         monkeypatch.undo()
         finetuned_mod._load_model.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_finetuned_backend_falls_back_to_rules_when_inference_fails(monkeypatch):
+    """A runtime DeBERTa error should preserve analysis through the rules backend."""
+    from app.engines.nlp.backends import finetuned as finetuned_mod
+
+    class FakeModel:
+        pass
+
+    finetuned_mod._load_model.cache_clear()
+    monkeypatch.setattr(finetuned_mod, "_load_model", lambda: (object(), FakeModel()))
+    backend = FinetunedBackend()
+
+    def fail_prediction(*_args):
+        raise RuntimeError("mocked model failure")
+
+    monkeypatch.setattr(backend, "_predict", fail_prediction)
+    signals = await backend.analyze(PHISHING_EMAIL)
+
+    assert signals.backend_used == "rules"
+    assert signals.phishing_intent > 0
 
 
 @pytest.mark.asyncio

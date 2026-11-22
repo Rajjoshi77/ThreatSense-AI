@@ -1,5 +1,6 @@
 {
   "model_type": "deberta_multilabel_threat",
+  "training_data": "human_labeled",
   "base_model": "microsoft/deberta-v3-small",
   "num_labels": 15,
   "labels": [
@@ -19,10 +20,10 @@
     "payment_request",
     "remote_access_request"
   ],
-  "trained_at": "2026-11-21T15:07:31.104853+00:00",
+  "trained_at": "2026-11-22T06:50:55.507306+00:00",
   "epochs": 4,
   "batch_size": 8,
   "learning_rate": 2e-05,
-  "training_seconds": 1529.93,
+  "training_seconds": 258.12,
   "device": "cpu"
 }

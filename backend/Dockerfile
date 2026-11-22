@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml .
 # Create a minimal package structure so hatchling can install deps
 RUN mkdir -p app && touch app/__init__.py
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e ".[db,ml]"
 
 # Copy the full source
 COPY app/ app/

@@ -124,12 +124,7 @@ async def _run_pipeline(artifact: Artifact, db: AsyncSession) -> RiskReport:
 
     try:
         # ── Engine initialisation ─────────────────────────────────────────────
-        try:
-            nlp_engine = build_nlp_engine(settings.NLP_BACKEND.value)
-        except (NotImplementedError, ValueError) as exc:
-            errors.append(str(exc))
-            nlp_engine = build_nlp_engine("rules")
-            skipped.append("nlp_requested_backend")
+        nlp_engine = build_nlp_engine(settings.NLP_BACKEND.value)
 
         ctx = AnalysisContext(
             artifact=artifact,
@@ -179,11 +174,16 @@ async def _run_pipeline(artifact: Artifact, db: AsyncSession) -> RiskReport:
             skipped.append("d12_chain_resolution_offline")
 
         engine_signals = ctx.get_engine_signals_snapshot()
+        actual_nlp_backend = (
+            engine_signals.nlp.backend_used
+            if engine_signals.nlp is not None
+            else settings.NLP_BACKEND.value
+        )
         report = await _aggregator.aggregate(
             artifact=artifact,
             results=detection_results,
             engine_signals=engine_signals,
-            nlp_backend_used=ctx._nlp_engine.backend_name if ctx._nlp_engine else None,
+            nlp_backend_used=actual_nlp_backend,
             errors=errors,
             skipped=skipped,
         )
@@ -208,6 +208,7 @@ async def _run_pipeline(artifact: Artifact, db: AsyncSession) -> RiskReport:
             ))
 
         analysis_row.status = "complete"
+        analysis_row.nlp_backend_used = actual_nlp_backend
         analysis_row.risk_score = report.risk_score
         analysis_row.verdict = report.verdict.value
         analysis_row.primary_threat_type = report.primary_threat_type
@@ -220,6 +221,12 @@ async def _run_pipeline(artifact: Artifact, db: AsyncSession) -> RiskReport:
 
         return report
 
+    except HTTPException as exc:
+        analysis_row.status = "error"
+        analysis_row.errors = [str(exc.detail)]
+        analysis_row.completed_at = datetime.utcnow()
+        await db.commit()
+        raise
     except Exception as exc:
         logger.exception("Pipeline failed for artifact %s", artifact.id)
         analysis_row.status = "error"

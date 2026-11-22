@@ -406,19 +406,25 @@ cd backend
 
 ### 4. Train the DeBERTa NLP Model (optional)
 
-The fine-tuned backend is off by default (`NLP_BACKEND=rules`). To enable
-`NLP_BACKEND=finetuned` you need the model weights, which are gitignored
-(~542 MB). See [`ml/artifacts/nlp_model/README.md`](ml/artifacts/nlp_model/README.md).
+The application defaults to `NLP_BACKEND=finetuned` and uses a complete trained checkpoint when available (weights are gitignored, ~542 MB). If weights are missing or inference fails, startup and analysis continue with the rules backend and each report identifies the backend actually used. See [`ml/artifacts/nlp_model/README.md`](ml/artifacts/nlp_model/README.md).
+
+Normal training requires at least 50 human-reviewed examples in `ml/data/gold_labels.csv`:
 
 ```powershell
 # from the repository root, using the interpreter you installed the ML stack into
+Copy-Item ml/data/gold_labels_template.csv ml/data/gold_labels.csv
+# Fill gold_labels.csv with reviewed examples, then:
 pip install -r ml/training/requirements.txt
-python ml/training/train_nlp_deberta.py --epochs 4          # full run
-python ml/training/train_nlp_deberta.py --small --epochs 1 --out .\tmp_model  # smoke test
+python ml/training/train_nlp_deberta.py --epochs 4
+# Synthetic smoke test only; isolated output is mandatory:
+python ml/training/train_nlp_deberta.py --small --epochs 1 --out .\tmp_model
 ```
 
-- Artifacts land in `ml/artifacts/nlp_model/` by default; use `--out` to write elsewhere
-  so a smoke test never overwrites a trained model.
+- Normal training saves artifacts to `ml/artifacts/nlp_model/`; deploy via a local
+  checkpoint or set `NLP_FINETUNED_PATH` to a Hugging Face model ID. Set `HF_TOKEN`
+  as a secret for a private repository.
+- Synthetic smoke-test weights must not be used in production and cannot overwrite the
+  default checkpoint directory.
 - Train with `torch` 2.7.x + `transformers` 4.x. A `transformers` 5.x build produced
   **NaN loss** in testing; the trainer aborts on non-finite loss rather than saving garbage.
 - The backend venv (`backend/.venv`) is for running the API and tests. Keep training in a
@@ -429,5 +435,5 @@ Verify the model is actually being used:
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe -c "from app.core.config import settings; print(settings.NLP_BACKEND.value)"
-# finetuned
+# finetuned (requires a trained checkpoint and its weights)
 ```

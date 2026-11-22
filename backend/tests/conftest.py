@@ -21,6 +21,7 @@ import pytest_asyncio
 
 # ── Point at an in-memory SQLite before any app code loads the engine ─────────
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ["NLP_BACKEND"] = "rules"
 
 
 @pytest.fixture(scope="session", autouse=True)

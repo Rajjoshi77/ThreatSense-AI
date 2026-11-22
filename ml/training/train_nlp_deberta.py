@@ -392,7 +392,16 @@ def train(
     small: bool = False,
     out_dir: Path | str | None = None,
 ):
-    """Fine-tune DeBERTa model on multi-label threat dataset."""
+    """Fine-tune DeBERTa on reviewed labels or run an isolated synthetic smoke test."""
+    if small and (
+        out_dir is None or Path(out_dir).resolve() == ARTIFACT_DIR.resolve()
+    ):
+        raise ValueError(
+            "Synthetic --small runs must specify a non-production --out directory "
+            "so they cannot overwrite the default model checkpoint. "
+            "Example: --small --out ./tmp_model"
+        )
+
     logger.info("Initializing DeBERTa training pipeline...")
     logger.info("Base model: %s | Epochs: %d | Batch size: %d | LR: %e", base_model_name, epochs, batch_size, lr)
 
@@ -415,29 +424,65 @@ def train(
     logger.info("Using device: %s", device)
 
     # 1. Dataset Preparation
-    data_items = []
-    gold_csv = ROOT / "ml" / "data" / "gold_labels_template.csv"
-    if not small and gold_csv.exists() and gold_csv.stat().st_size > 1000:
+    if small:
+        logger.warning(
+            "--small uses synthetic examples for a smoke test only; this checkpoint "
+            "is not suitable for production inference."
+        )
+        data_items = _make_synthetic_dataset() * 3
+    else:
         import csv
-        logger.info("Loading ground truth dataset from %s", gold_csv)
-        with open(gold_csv, "r", encoding="utf-8") as f:
+
+        gold_csv = ROOT / "ml" / "data" / "gold_labels.csv"
+        if not gold_csv.is_file():
+            raise FileNotFoundError(
+                f"Human-labeled training data is required at {gold_csv}. "
+                "Copy ml/data/gold_labels_template.csv to gold_labels.csv, fill it "
+                "with reviewed labels, and rerun training. Use --small only for a "
+                "synthetic smoke test."
+            )
+
+        logger.info("Loading human-labeled data from %s", gold_csv)
+        data_items = []
+        with gold_csv.open("r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
-            for row in reader:
-                text = row.get("text", "").strip()
+            required_columns = {"text", *(f"label_{signal}" for signal in SIGNAL_LABELS)}
+            missing_columns = required_columns - set(reader.fieldnames or [])
+            if missing_columns:
+                raise ValueError(
+                    f"Training dataset is missing required columns: {sorted(missing_columns)}"
+                )
+
+            for row_number, row in enumerate(reader, start=2):
+                text = (row.get("text") or "").strip()
                 if not text:
                     continue
+
                 labels = {}
                 for signal in SIGNAL_LABELS:
-                    col = f"label_{signal}"
-                    val = float(row.get(col, 0.0) or 0.0)
-                    if val > 0:
-                        labels[signal] = val
+                    column = f"label_{signal}"
+                    raw_value = (row.get(column) or "").strip()
+                    try:
+                        value = float(raw_value) if raw_value else 0.0
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Invalid value for {column} on CSV row {row_number}: {raw_value!r}"
+                        ) from exc
+                    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+                        raise ValueError(
+                            f"{column} on CSV row {row_number} must be a number in [0, 1]"
+                        )
+                    if value > 0:
+                        labels[signal] = value
+
                 data_items.append({"text": text, "labels": labels})
-    else:
-        logger.info("Using representative synthetic dataset (%s mode)", "small" if small else "fallback")
-        synthetic = _make_synthetic_dataset()
-        # Expand for a few training iterations so the tokenizer sees enough steps
-        data_items = synthetic * (3 if small else 6)
+
+        if len(data_items) < 50:
+            raise ValueError(
+                f"Only {len(data_items)} labeled examples found in {gold_csv}; "
+                "provide at least 50 reviewed examples before training. Use --small "
+                "with --out only for an isolated smoke test."
+            )
 
     logger.info("Loaded %d training examples", len(data_items))
 
@@ -545,6 +590,7 @@ def train(
     # Metadata & Report
     meta = {
         "model_type": "deberta_multilabel_threat",
+        "training_data": "synthetic_smoke_test" if small else "human_labeled",
         "base_model": base_model_name,
         "num_labels": num_labels,
         "labels": SIGNAL_LABELS,
@@ -565,11 +611,15 @@ def train(
 - **Task:** 15-Signal Multi-Label Cyber Threat Classification
 - **Trained At:** {meta['trained_at']}
 - **Training Time:** {elapsed:.1f}s ({meta['device']})
+- **Training Data:** {meta['training_data']}
 - **Signals Output:**
 {chr(10).join(f'  - `{s}`' for s in SIGNAL_LABELS)}
 
 ## Production Usage
-Set `NLP_BACKEND=finetuned` in your `.env` file to activate this model in ThreatSense AI.
+Set `NLP_BACKEND=finetuned` and configure `NLP_FINETUNED_PATH` to activate a
+trained checkpoint in ThreatSense AI.
+
+{'> **Not for production:** this checkpoint was trained on synthetic smoke-test examples.' if small else ''}
 """
     with open(artifact_dir / "REPORT.md", "w", encoding="utf-8") as f:
         f.write(report_md)

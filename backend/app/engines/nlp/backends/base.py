@@ -19,7 +19,7 @@ class SignalBackend(ABC):
     Implementations:
       - ``RulesBackend``     — deterministic lexicon/regex (Stage 4)
       - ``ZeroShotBackend``  — pretrained NLI model (Stage 4)
-      - ``FinetunedBackend`` — fine-tuned DeBERTa (Stage 13, stub until then)
+      - ``FinetunedBackend`` — fine-tuned 15-signal DeBERTa classifier (requires checkpoint weights)
       - ``EnsembleBackend``  — configurable combination (Stage 4)
     """
 
