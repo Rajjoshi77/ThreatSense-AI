@@ -16,43 +16,60 @@ const ARTIFACT_TYPES = [
 
 const SAMPLE_PRESETS = [
   {
-    type: 'url',
-    title: 'PayPal Credential Phishing URL',
-    tag: 'malicious',
-    tagLabel: 'Phishing',
-    content: 'http://secure-paypal-login.xyz/verify?token=abc12345&redirect=account-recovery',
+    type: 'url', title: 'Suspicious account URL', tag: 'suspicious', tagLabel: 'URL',
+    content: 'https://account-check.example.test/verify?token=sample123&redirect=login',
   },
   {
-    type: 'sms',
-    title: 'Urgent Banking Smishing SMS',
-    tag: 'malicious',
-    tagLabel: 'Smishing',
-    content: 'URGENT: Your SBI account #8921 is temporarily blocked due to suspicious activity. Verify your identity immediately at http://sbi-secure.xyz to avoid suspension.',
+    type: 'url', title: 'Safe documentation URL', tag: 'safe', tagLabel: 'Baseline',
+    content: 'https://docs.example.test/guide',
   },
   {
-    type: 'email',
-    title: 'CEO Fraud / Spear-Phishing Wire Request',
-    tag: 'suspicious',
-    tagLabel: 'BEC Fraud',
-    content: `From: "Executive Office" <ceo@corp-internal-update.biz>
-To: finance@yourcompany.com
-Subject: URGENT: Confidential Wire Transfer Request - Acquisition
-Date: Fri, 20 Nov 2026 09:30:00 +0000
-
-Hi Team,
-
-I am in an executive board meeting with poor reception. Please process an urgent wire transfer of $48,500 to our external counsel today.
-Details are attached. Treat this with strict confidentiality.
-
-Regards,
-Chief Executive Officer`,
+    type: 'email', title: 'Urgent credential-reset email', tag: 'malicious', tagLabel: 'Email',
+    content: `From: Account Support <support@account-check.example.test>\nTo: user@example.test\nSubject: URGENT: Account access will be suspended\n\nYour account has been restricted. Verify your password and one-time code immediately at https://account-check.example.test/verify to restore access.`,
   },
   {
-    type: 'sms',
-    title: 'Safe Operational Notification (Baseline)',
-    tag: 'safe',
-    tagLabel: 'Benign',
-    content: 'Hello Team, your scheduled code review meeting is set for tomorrow at 10:00 AM UTC in Conference Room B. See you there.',
+    type: 'email', title: 'Routine meeting email', tag: 'safe', tagLabel: 'Baseline',
+    content: `From: Project Coordinator <coordinator@example.test>\nTo: team@example.test\nSubject: Weekly project sync\n\nHello team, our weekly project sync is scheduled for Tuesday at 10:00. Please review the shared agenda before the meeting.`,
+  },
+  {
+    type: 'sms', title: 'Account-lock smishing message', tag: 'malicious', tagLabel: 'SMS',
+    content: 'URGENT: Your account is locked. Verify your password and one-time code now at https://account-check.example.test/verify to avoid permanent suspension.',
+  },
+  {
+    type: 'sms', title: 'Routine delivery update', tag: 'safe', tagLabel: 'Baseline',
+    content: 'Your sample parcel is scheduled for delivery tomorrow. No action is needed. Tracking details are available in the courier app.',
+  },
+  {
+    type: 'webpage', title: 'Credential form HTML', tag: 'suspicious', tagLabel: 'Webpage',
+    asset: '/sample-vectors/phishing-login.html', filename: 'phishing-login.html', mime: 'text/html',
+  },
+  {
+    type: 'webpage', title: 'Library information HTML', tag: 'safe', tagLabel: 'Baseline',
+    asset: '/sample-vectors/benign-page.html', filename: 'benign-page.html', mime: 'text/html',
+  },
+  {
+    type: 'image', title: 'Synthetic account-warning screenshot', tag: 'suspicious', tagLabel: 'Image',
+    asset: '/sample-vectors/sample-scam-screenshot.png', filename: 'sample-scam-screenshot.png', mime: 'image/png',
+  },
+  {
+    type: 'image', title: 'Library-hours screenshot', tag: 'safe', tagLabel: 'Baseline',
+    asset: '/sample-vectors/benign-screenshot.png', filename: 'benign-screenshot.png', mime: 'image/png',
+  },
+  {
+    type: 'qr', title: 'QR with reserved sample URL', tag: 'suspicious', tagLabel: 'QR',
+    asset: '/sample-vectors/sample-quishing.png', filename: 'sample-quishing.png', mime: 'image/png',
+  },
+  {
+    type: 'qr', title: 'QR with plain sample text', tag: 'safe', tagLabel: 'Baseline',
+    asset: '/sample-vectors/sample-plain-qr.png', filename: 'sample-plain-qr.png', mime: 'image/png',
+  },
+  {
+    type: 'file', title: 'Inert script-extension sample', tag: 'suspicious', tagLabel: 'File',
+    asset: '/sample-vectors/extension-check.bat', filename: 'extension-check.bat', mime: 'text/plain',
+  },
+  {
+    type: 'file', title: 'Routine notes attachment', tag: 'safe', tagLabel: 'Baseline',
+    asset: '/sample-vectors/routine-notes.txt', filename: 'routine-notes.txt', mime: 'text/plain',
   },
 ]
 
@@ -410,6 +427,7 @@ export default function App() {
   const [loadingStep, setLoadingStep] = useState(1)
   const [error, setError] = useState(null)
   const [report, setReport] = useState(null)
+  const [sampleCheck, setSampleCheck] = useState(null)
   const [drag, setDrag] = useState(false)
   const [copiedId, setCopiedId] = useState(false)
   const fileRef = useRef(null)
@@ -436,12 +454,14 @@ export default function App() {
     setContent('')
     setFile(null)
     setError(null)
+    setSampleCheck(null)
   }
 
   const handleFileSelect = (f) => {
     if (!f) return
     setFile(f)
     setError(null)
+    setSampleCheck(null)
   }
 
   const handleDrop = useCallback((e) => {
@@ -453,12 +473,99 @@ export default function App() {
     }
   }, [])
 
-  const applyPreset = (preset) => {
-    setArtifactType(preset.type)
-    setContent(preset.content)
+  const runAnalysis = async (type, payload, sampleTitle = null) => {
+    const typeIsBinary = ARTIFACT_TYPES.find((item) => item.id === type)?.binary
+    setArtifactType(type)
+    setContent(payload.content || '')
+    setFile(payload.file || null)
+    setError(null)
+    setReport(null)
+    setSampleCheck(null)
+    setLoading(true)
+
+    try {
+      let resp
+      if (typeIsBinary && payload.file) {
+        const fd = new FormData()
+        fd.append('type', type)
+        fd.append('file', payload.file)
+        resp = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: fd })
+      } else {
+        resp = await fetch(`${API_BASE}/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, raw_content: payload.content || '' }),
+        })
+      }
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+        throw new Error(err.detail || `HTTP Error ${resp.status}`)
+      }
+
+      const data = await resp.json()
+      setReport(data)
+      if (sampleTitle) {
+        const checks = [
+          { label: 'API request succeeded', passed: resp.ok },
+          { label: 'Artifact type matches sample', passed: data.artifact_type === type },
+          { label: 'Risk score is within 0–100', passed: Number.isFinite(data.risk_score) && data.risk_score >= 0 && data.risk_score <= 100 },
+          { label: 'Verdict is present', passed: Boolean(data.verdict) },
+          { label: 'Analysis identifier returned', passed: Boolean(data.analysis_id) },
+          { label: 'Five domain scores returned', passed: Array.isArray(data.per_domain_scores) && data.per_domain_scores.length === 5 },
+          { label: 'At least one compatible detector ran', passed: Array.isArray(data.per_domain_scores) && data.per_domain_scores.some((domain) => domain.detectors_ran > 0) },
+          { label: 'NLP backend reported', passed: Boolean(data.nlp_backend_used) },
+        ]
+        if (type === 'qr' || type === 'image' || type === 'file') {
+          const evidenceRules = (data.top_evidence || []).map((item) => item.rule_id)
+          const featureCheck = {
+            qr: { label: 'QR URL payload decoded', ruleId: 'qr_contains_url' },
+            image: { label: 'Screenshot OCR extracted text', ruleId: 'media_ocr_text' },
+            file: { label: 'Suspicious extension surfaced in evidence', ruleId: 'email_attachment' },
+          }[type]
+          checks.push({ label: featureCheck.label, passed: evidenceRules.includes(featureCheck.ruleId) })
+        }
+        setSampleCheck({ title: sampleTitle, checks })
+      }
+    } catch (err) {
+      if (sampleTitle) setSampleCheck({ title: sampleTitle, checks: [], error: err.message })
+      if (err.message.includes('Failed to fetch') || err.message.includes('Network Error')) {
+        setError(
+          `Connection Error: Could not reach ThreatSense backend at ${API_BASE}.\n\n` +
+          `• Verify your FastAPI server is running (e.g. uvicorn app.main:app --reload).\n` +
+          `• For remote environments, ensure CORS allows this origin and VITE_API_URL is configured correctly.`
+        )
+      } else {
+        setError(err.message)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const runSample = async (sample) => {
+    if (!sample.asset) {
+      await runAnalysis(sample.type, { content: sample.content }, sample.title)
+      return
+    }
+    setLoading(true)
+    setArtifactType(sample.type)
+    setContent('')
     setFile(null)
     setError(null)
     setReport(null)
+    setSampleCheck(null)
+    try {
+      const response = await fetch(sample.asset)
+      if (!response.ok) throw new Error(`Could not load sample file (${response.status})`)
+      const blob = await response.blob()
+      const fileSample = new File([blob], sample.filename, { type: sample.mime })
+      await runAnalysis(sample.type, { file: fileSample }, sample.title)
+    } catch (err) {
+      setLoading(false)
+      setError(err.message)
+      setSampleCheck({ title: sample.title, checks: [], error: err.message })
+    }
   }
 
   const handleCopyAnalysisId = (id) => {
@@ -484,49 +591,12 @@ export default function App() {
     setFile(null)
     setError(null)
     setReport(null)
+    setSampleCheck(null)
   }
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault()
-    setError(null)
-    setLoading(true)
-    setReport(null)
-
-    try {
-      let resp
-      if (isBinary && file) {
-        const fd = new FormData()
-        fd.append('type', artifactType)
-        fd.append('file', file)
-        resp = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: fd })
-      } else {
-        resp = await fetch(`${API_BASE}/analyze`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: artifactType, raw_content: content }),
-        })
-      }
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ detail: resp.statusText }))
-        throw new Error(err.detail || `HTTP Error ${resp.status}`)
-      }
-
-      const data = await resp.json()
-      setReport(data)
-    } catch (err) {
-      if (err.message.includes('Failed to fetch') || err.message.includes('Network Error')) {
-        setError(
-          `Connection Error: Could not reach ThreatSense backend at ${API_BASE}.\n\n` +
-          `• Verify your FastAPI server is running (e.g. uvicorn app.main:app --reload).\n` +
-          `• For remote environments, ensure CORS allows this origin and VITE_API_URL is configured correctly.`
-        )
-      } else {
-        setError(err.message)
-      }
-    } finally {
-      setLoading(false)
-    }
+    runAnalysis(artifactType, { content, file })
   }
 
   const sortedEvidence = report?.top_evidence
@@ -669,7 +739,7 @@ export default function App() {
                     'Paste SMS message, OTP request, or smishing text…'
                   }
                   value={content}
-                  onChange={(e) => setContent(e.target.value)}
+                  onChange={(e) => { setContent(e.target.value); setSampleCheck(null) }}
                 />
 
                 <div className="input-footer">
@@ -712,19 +782,22 @@ export default function App() {
               <IconCheckShield size={14} />
               <span>Sample Test Vectors</span>
             </div>
+            <p className="sample-disclaimer">Samples use harmless reserved domains. Tags describe the scenario, not an expected verdict. Checks validate API output structure, not detection accuracy.</p>
             <div className="preset-list">
-              {SAMPLE_PRESETS.map((sample, idx) => (
-                <div
-                  key={idx}
+              {SAMPLE_PRESETS.map((sample) => (
+                <button
+                  type="button"
+                  key={sample.title}
                   className="preset-chip"
-                  onClick={() => applyPreset(sample)}
-                  title="Click to populate input with this sample"
+                  onClick={() => runSample(sample)}
+                  disabled={loading}
+                  title={`Run ${sample.type} sample through the analysis API`}
                 >
                   <span>{sample.title}</span>
                   <span className={`preset-chip-tag ${sample.tag}`}>
                     {sample.tagLabel}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -740,6 +813,29 @@ export default function App() {
                 <div className="error-title">Analysis Request Failed</div>
                 <div className="error-body">{error}</div>
               </div>
+            </div>
+          )}
+
+          {sampleCheck && (
+            <div className={`sample-check-card ${sampleCheck.error ? 'failed' : ''}`} role="status">
+              <div className="sample-check-title">
+                <strong>Sample API checks: {sampleCheck.title}</strong>
+                {!sampleCheck.error && (
+                  <span>{sampleCheck.checks.filter((check) => check.passed).length}/{sampleCheck.checks.length} passed</span>
+                )}
+              </div>
+              {sampleCheck.error ? (
+                <p>{sampleCheck.error}</p>
+              ) : (
+                <ul>
+                  {sampleCheck.checks.map((check) => (
+                    <li key={check.label} className={check.passed ? 'passed' : 'failed'}>
+                      <span aria-hidden="true">{check.passed ? '✓' : '✕'}</span> {check.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <small>These checks validate API response structure only, not whether threat detection is accurate.</small>
             </div>
           )}
 
