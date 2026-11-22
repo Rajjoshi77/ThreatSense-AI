@@ -24,9 +24,9 @@ services:
         sync: false
       - key: INTEL_OFFLINE
         value: "false"
-      # Allow requests from any origin in production to avoid Render URL mismatch
+      # Restrict the API to the deployed frontend origin.
       - key: CORS_ORIGINS
-        value: "*"
+        value: "https://threatsense-ui.onrender.com"
 
   # ── Frontend Static Site ───────────────────────────────────────────────────
   - type: web

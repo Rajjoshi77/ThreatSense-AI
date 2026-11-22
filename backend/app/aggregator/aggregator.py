@@ -5,7 +5,7 @@ Scoring algorithm:
   1. Per-domain score = noisy-OR of all detector scores in that domain.
        noisy_or([s1, s2, ...]) = 1 - product(1-si)
   2. Domain weights loaded from AGGREGATOR_WEIGHTS config (or defaults below).
-  3. Overall risk_score = weighted average of domain scores (0-100 scale).
+  3. Overall risk_score = weighted average of applicable domain scores (0-100 scale); skipped domains are excluded.
   4. Hard-override rules:
        - Intel hit  → floor score at 0.80 (MALICIOUS)
        - CRITICAL evidence from any detector → floor at 0.70
@@ -190,20 +190,31 @@ class RiskAggregator:
         # ── 3. Weighted overall score ──────────────────────────────────────────
         weighted_sum = 0.0
         weight_total = 0.0
+        active_domain_scores: list[float] = []
         for did, ds in domain_scores.items():
+            if not any(
+                result.domain_id == did
+                and result.ran
+                and result.verdict not in (Verdict.NOT_IMPLEMENTED, Verdict.ERROR)
+                for result in by_domain[did]
+            ):
+                continue
+            active_domain_scores.append(ds)
             w = _DOMAIN_WEIGHTS.get(did, 0.10)
             weighted_sum += ds * w
             weight_total += w
 
         raw_score = weighted_sum / weight_total if weight_total > 0 else 0.0
 
-        # Hard boost: if any single domain scores very high it must at least
-        # become SUSPICIOUS regardless of other domain weights.
-        max_domain_score = max(domain_scores.values(), default=0.0)
+        # Do not let averaging across small domain weights erase a detector-level
+        # suspicious finding from an applicable domain.
+        max_domain_score = max(active_domain_scores, default=0.0)
         if max_domain_score >= 0.80:
             raw_score = max(raw_score, 0.50)   # floor at LIKELY_MALICIOUS
         elif max_domain_score >= 0.60:
             raw_score = max(raw_score, 0.25)   # floor at SUSPICIOUS
+        elif max_domain_score >= 0.35:
+            raw_score = max(raw_score, 0.25)   # preserve a suspicious detector finding
 
         # ── 4. Hard override: intel hit ────────────────────────────────────────
         intel_hit = (engine_signals and engine_signals.intel

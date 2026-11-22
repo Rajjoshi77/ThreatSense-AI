@@ -10,6 +10,7 @@ import tldextract
 
 from app.core.registry import register_detector
 from app.detectors.base import BaseDetector
+from app.engines.url.features import extract_features, has_combined_suspicious_url_signals
 from app.schemas.schemas import (
     Artifact,
     ArtifactType,
@@ -73,11 +74,14 @@ class QRPhishingDetector(BaseDetector):
         scores: list[float] = []
         evidence: list[Evidence] = []
         decoded_urls = 0
+        text_payloads: list[str] = []
         decode_failure = ctx.get_failures().get("media:qr")
 
         for payload in payloads[:5]:
             value = payload.strip()
             if not _URL_RE.match(value):
+                if value and sum(char.isprintable() for char in value) / len(value) >= 0.9:
+                    text_payloads.append(value[:2000])
                 continue
 
             parsed = urlparse(value)
@@ -129,6 +133,17 @@ class QRPhishingDetector(BaseDetector):
 
             url_sig = await ctx.get_url_signals(value)
             structural_score = float(url_sig.risk_score or 0.0)
+            if has_combined_suspicious_url_signals(extract_features(value)):
+                url_risks.append(0.35)
+                evidence.append(Evidence(
+                    source_engine="url",
+                    severity=EvidenceSeverity.MEDIUM,
+                    description=(
+                        "QR destination combines an unfamiliar or higher-risk suffix "
+                        "with multiple account or verification tokens"
+                    ),
+                    rule_id="qr_combined_url_signals",
+                ))
             if structural_score >= 0.55:
                 url_risks.append(min(0.7, structural_score))
                 evidence.append(Evidence(
@@ -148,13 +163,48 @@ class QRPhishingDetector(BaseDetector):
 
             scores.append(max(url_risks, default=0.0))
 
-        if decoded_urls == 0:
+        if decoded_urls == 0 and text_payloads:
+            nlp = await ctx.get_nlp_signals("\n".join(text_payloads))
+            score = min(1.0, (
+                nlp.phishing_intent * 0.35
+                + nlp.credential_request * 0.25
+                + nlp.scam_intent * 0.20
+                + nlp.payment_request * 0.10
+                + nlp.remote_access_request * 0.10
+            ))
+            verdict = (Verdict.MALICIOUS if score >= 0.70
+                       else Verdict.LIKELY_MALICIOUS if score >= 0.45
+                       else Verdict.SUSPICIOUS if score >= 0.20
+                       else Verdict.SAFE)
+            evidence.append(Evidence(
+                source_engine="nlp",
+                severity=EvidenceSeverity.INFO,
+                description=f"Readable QR text was assessed with the {nlp.backend_used} NLP backend",
+                rule_id="qr_text_analyzed",
+                metadata={"backend": nlp.backend_used, "text_length": nlp.text_length},
+            ))
+            for signal_name, signal_score in (
+                ("phishing_intent", nlp.phishing_intent),
+                ("credential_request", nlp.credential_request),
+                ("scam_intent", nlp.scam_intent),
+                ("payment_request", nlp.payment_request),
+                ("remote_access_request", nlp.remote_access_request),
+            ):
+                if signal_score >= 0.25:
+                    evidence.append(Evidence(
+                        source_engine="nlp",
+                        severity=EvidenceSeverity.MEDIUM,
+                        description=f"QR text contains a {signal_name.replace('_', ' ')} signal ({signal_score:.2f})",
+                        rule_id=f"qr_text_{signal_name}",
+                        metadata={"signal": signal_name, "score": signal_score},
+                    ))
+        elif decoded_urls == 0:
             verdict = Verdict.UNKNOWN
             score = 0.0
             evidence.append(Evidence(
                 source_engine="media",
                 severity=EvidenceSeverity.INFO,
-                description="Decoded QR payload contains no URL; other payload types were not assessed as threat content",
+                description="Decoded QR payload contains no assessable URL or readable text",
                 rule_id="qr_non_url_payload",
             ))
         else:

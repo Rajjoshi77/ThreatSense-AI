@@ -126,6 +126,16 @@ async def test_d10_ip_host_scored_suspicious_or_higher() -> None:
 
 
 @pytest.mark.asyncio
+async def test_d10_multiple_sensitive_tokens_on_unfamiliar_tld_are_suspicious() -> None:
+    url = "https://account-check.example.test/verify?token=sample123&redirect=login"
+    result = await MaliciousURLDetector().detect(_url_artifact(url), _ctx(url))
+
+    assert result.verdict == Verdict.SUSPICIOUS
+    assert result.score >= 0.35
+    assert any(item.rule_id == "combined_url_signals" for item in result.evidence)
+
+
+@pytest.mark.asyncio
 async def test_d10_result_has_evidence() -> None:
     det = MaliciousURLDetector()
     url = "http://paypa1-secure.xyz/verify?account=12345"
@@ -273,6 +283,16 @@ async def test_d12_positive_flagged(url: str) -> None:
     assert result.verdict != Verdict.SAFE, (
         f"D12 missed redirect risk in '{url}' (score={result.score})"
     )
+
+
+@pytest.mark.asyncio
+async def test_d12_local_redirect_parameter_is_not_flagged() -> None:
+    url = "https://example.com/redirect?redirect=login"
+    result = await MaliciousRedirectsDetector().detect(_url_artifact(url), _ctx(url))
+
+    assert result.score == 0.0
+    assert result.verdict == Verdict.SAFE
+    assert result.evidence == []
 
 
 @pytest.mark.asyncio

@@ -55,6 +55,42 @@ async def test_qr_detector_does_not_flag_benign_url_presence() -> None:
 
 
 @pytest.mark.asyncio
+async def test_qr_detector_flags_combined_suspicious_url_signals() -> None:
+    url = "https://account-check.example.test/verify?sample=1"
+    artifact = Artifact(type=ArtifactType.QR)
+    ctx = AnalysisContext(
+        artifact=artifact,
+        media_engine=QRPayloadEngine([url]),
+        url_engine=URLEngine(),
+        intel_provider=IntelEngine(),
+    )
+
+    result = await QRPhishingDetector().detect(artifact, ctx)
+
+    assert result.verdict == Verdict.SUSPICIOUS
+    assert result.score >= 0.35
+    assert any(item.rule_id == "qr_combined_url_signals" for item in result.evidence)
+
+
+@pytest.mark.asyncio
+async def test_qr_detector_analyzes_readable_text_payload() -> None:
+    from app.engines.nlp.backends.rules import RulesBackend
+
+    payload = "Verify your password and one-time code now to avoid account suspension."
+    artifact = Artifact(type=ArtifactType.QR)
+    ctx = AnalysisContext(
+        artifact=artifact,
+        media_engine=QRPayloadEngine([payload]),
+        nlp_engine=type("NLPStub", (), {"analyze": RulesBackend().analyze})(),
+    )
+
+    result = await QRPhishingDetector().detect(artifact, ctx)
+
+    assert result.verdict in {Verdict.SUSPICIOUS, Verdict.LIKELY_MALICIOUS}
+    assert any(item.rule_id == "qr_text_credential_request" for item in result.evidence)
+
+
+@pytest.mark.asyncio
 async def test_qr_detector_checks_local_threat_intelligence() -> None:
     class TestIntelProvider:
         async def lookup(self, indicator: str) -> IntelSignals:

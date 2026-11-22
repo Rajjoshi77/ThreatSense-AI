@@ -71,6 +71,34 @@ class SuspiciousAttachmentsDetector(BaseDetector):
         evidence: list[Evidence] = []
         max_score = 0.0
 
+        if artifact.type == ArtifactType.FILE and artifact.raw_content.strip():
+            nlp = await ctx.get_nlp_signals()
+            text_signals = {
+                "phishing_intent": (nlp.phishing_intent, 0.35),
+                "credential_request": (nlp.credential_request, 0.25),
+                "scam_intent": (nlp.scam_intent, 0.20),
+                "payment_request": (nlp.payment_request, 0.10),
+                "remote_access_request": (nlp.remote_access_request, 0.10),
+            }
+            text_score = sum(value * weight for value, weight in text_signals.values())
+            max_score = max(max_score, min(1.0, text_score))
+            evidence.append(Evidence(
+                source_engine="nlp",
+                severity=EvidenceSeverity.INFO,
+                description=f"Plain-text file content was checked with the {nlp.backend_used} NLP backend",
+                rule_id="file_text_analyzed",
+                metadata={"backend": nlp.backend_used, "text_length": nlp.text_length},
+            ))
+            for signal, (value, _weight) in text_signals.items():
+                if value >= 0.25:
+                    evidence.append(Evidence(
+                        source_engine="nlp",
+                        severity=EvidenceSeverity.MEDIUM,
+                        description=f"Plain-text file contains a {signal.replace('_', ' ')} signal ({value:.2f})",
+                        rule_id=f"file_nlp_{signal}",
+                        metadata={"signal": signal, "score": value},
+                    ))
+
         # Check structured attachments from normalizer
         for att in artifact.attachments:
             att_score, desc = _score_attachment(att)

@@ -248,7 +248,7 @@ async def test_analyze_qr_payload_is_routed_through_url_detectors(client) -> Non
     data = response.json()
     assert data["nlp_backend_used"] == "not_applicable"
     assert data["engine_signals"]["nlp"]["text_length"] == 0
-    assert data["verdict"] == "safe"
+    assert data["verdict"] == "suspicious"
     d2 = next(domain for domain in data["per_domain_scores"] if domain["domain_id"] == "d2")
     d10 = next(detector for detector in d2["detectors"] if detector["detector_id"] == "d10_malicious_url")
     assert d10["ran"]
@@ -256,6 +256,32 @@ async def test_analyze_qr_payload_is_routed_through_url_detectors(client) -> Non
     d5 = next(domain for domain in data["per_domain_scores"] if domain["domain_id"] == "d5")
     qr_detector = next(detector for detector in d5["detectors"] if detector["detector_id"] == "d21_qr_phishing")
     assert "qr_contains_url" in [e["rule_id"] for e in qr_detector["evidence"]]
+    assert "qr_combined_url_signals" in [e["rule_id"] for e in qr_detector["evidence"]]
+
+
+async def test_analyze_plain_text_file_distinguishes_safe_and_suspicious_samples(client) -> None:
+    from pathlib import Path
+
+    samples = Path(__file__).resolve().parents[2] / "frontend/public/sample-vectors"
+    for filename, expected_verdict in (
+        ("routine-notes.txt", "safe"),
+        ("suspicious-note.txt", "suspicious"),
+    ):
+        response = await client.post(
+            "/analyze",
+            data={"type": "file"},
+            files={"file": (filename, (samples / filename).read_bytes(), "text/plain")},
+        )
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["verdict"] == expected_verdict
+        d4 = next(domain for domain in data["per_domain_scores"] if domain["domain_id"] == "d4")
+        attachment_detector = next(
+            detector for detector in d4["detectors"]
+            if detector["detector_id"] == "d20_suspicious_attachments"
+        )
+        assert "file_text_analyzed" in [item["rule_id"] for item in attachment_detector["evidence"]]
 
 
 async def test_analyze_plain_text_qr_reports_unknown(client) -> None:
@@ -274,7 +300,24 @@ async def test_analyze_plain_text_qr_reports_unknown(client) -> None:
         )
 
     assert response.status_code == 200, response.text
-    assert response.json()["verdict"] == "unknown"
+    data = response.json()
+    assert data["verdict"] == "safe"
+    d5 = next(domain for domain in data["per_domain_scores"] if domain["domain_id"] == "d5")
+    qr_detector = next(detector for detector in d5["detectors"] if detector["detector_id"] == "d21_qr_phishing")
+    assert "qr_text_analyzed" in [item["rule_id"] for item in qr_detector["evidence"]]
+
+
+async def test_analyze_url_score_uses_only_applicable_domains(client) -> None:
+    response = await client.post(
+        "/analyze",
+        json={"type": "url", "raw_content": "https://www.iana.org/help/example-domains"},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    d2 = next(domain for domain in data["per_domain_scores"] if domain["domain_id"] == "d2")
+    assert data["risk_score"] == round(d2["score"] * 100, 2)
+    assert data["verdict"] == "safe"
 
 
 async def test_analyze_report_includes_per_domain_scores(client) -> None:

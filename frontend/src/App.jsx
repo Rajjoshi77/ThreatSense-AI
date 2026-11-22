@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import EvaluationView from './EvaluationView'
 
 // ── Constants & Configuration ──────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ const SAMPLE_PRESETS = [
     asset: '/sample-vectors/benign-screenshot.png', filename: 'benign-screenshot.png', mime: 'image/png',
   },
   {
-    type: 'qr', title: 'QR with reserved sample URL', tag: 'suspicious', tagLabel: 'QR',
+    type: 'qr', title: 'QR with account-verification URL', tag: 'suspicious', tagLabel: 'QR',
     asset: '/sample-vectors/sample-quishing.png', filename: 'sample-quishing.png', mime: 'image/png',
   },
   {
@@ -81,6 +82,25 @@ function IconShield({ className, size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+  )
+}
+
+function IconFlask({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 2v7.5L4.5 19a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9.5V2" />
+      <path d="M8.5 2h7" />
+      <path d="M7 16h10" />
+    </svg>
+  )
+}
+
+function IconArrowLeft({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19 12H5" />
+      <path d="m12 19-7-7 7-7" />
     </svg>
   )
 }
@@ -454,6 +474,7 @@ export default function App() {
   const [sampleCheck, setSampleCheck] = useState(null)
   const [drag, setDrag] = useState(false)
   const [copiedId, setCopiedId] = useState(false)
+  const [view, setView] = useState('scanner')
   const fileRef = useRef(null)
 
   const activeTypeObj = ARTIFACT_TYPES.find(t => t.id === artifactType) || ARTIFACT_TYPES[0]
@@ -551,12 +572,25 @@ export default function App() {
         ]
         if (type === 'qr' || type === 'image' || type === 'file') {
           const evidenceRules = (data.top_evidence || []).map((item) => item.rule_id)
-          const featureCheck = {
-            qr: { label: 'QR URL payload decoded', ruleId: 'qr_contains_url' },
-            image: { label: 'Screenshot OCR extracted text', ruleId: 'media_ocr_text' },
-            file: { label: 'Suspicious extension surfaced in evidence', ruleId: 'email_attachment' },
-          }[type]
-          checks.push({ label: featureCheck.label, passed: evidenceRules.includes(featureCheck.ruleId) })
+          if (type === 'qr') {
+            const textSample = sampleTitle === 'QR with plain sample text'
+            checks.push({
+              label: textSample ? 'Readable QR text assessed' : 'QR URL payload decoded',
+              passed: evidenceRules.includes(textSample ? 'qr_text_analyzed' : 'qr_contains_url'),
+            })
+          } else if (type === 'image') {
+            const ocrReported = evidenceRules.includes('media_ocr_text') || (
+              evidenceRules.includes('media_ocr_unavailable') && data.verdict === 'unknown'
+            )
+            checks.push({ label: 'Screenshot OCR result or limitation reported', passed: ocrReported })
+          } else {
+            const routineText = sampleTitle === 'Routine notes attachment'
+            const expectedRule = routineText ? 'file_text_analyzed' : 'email_attachment'
+            checks.push({
+              label: routineText ? 'Plain-text content checked' : 'Suspicious extension surfaced in evidence',
+              passed: evidenceRules.includes(expectedRule),
+            })
+          }
         }
         setSampleCheck({ title: sampleTitle, checks })
       }
@@ -638,6 +672,53 @@ export default function App() {
       )
     : []
 
+  // ── Model Evaluation page (standalone) ──
+  if (view === 'evaluation') {
+    return (
+      <div className="app eval-page">
+        <header className="header eval-page-header">
+          <div className="header-brand">
+            <div className="header-logo-icon eval-logo">
+              <IconFlask size={22} />
+            </div>
+            <div className="header-brand-title">
+              <h1>Model Evaluation</h1>
+              <span className="header-brand-subtitle">
+                Independent benchmarks, bootstrap CIs &amp; full metric breakdown
+              </span>
+            </div>
+          </div>
+
+          <div className="header-right">
+            <button
+              type="button"
+              className="theme-toggle"
+              onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
+              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+              aria-pressed={theme === 'dark'}
+              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            >
+              {theme === 'dark' ? <IconSun /> : <IconMoon />}
+              <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+            </button>
+            <button
+              type="button"
+              className="theme-toggle eval-back-btn"
+              onClick={() => setView('scanner')}
+            >
+              <IconArrowLeft size={14} />
+              <span>Back to Scanner</span>
+            </button>
+          </div>
+        </header>
+
+        <div className="main eval-main">
+          <EvaluationView />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       {/* ── Executive Header ── */}
@@ -655,6 +736,15 @@ export default function App() {
         </div>
 
         <div className="header-right">
+          <button
+            type="button"
+            className="theme-toggle eval-nav-btn"
+            onClick={() => setView('evaluation')}
+            title="Open model evaluation dashboard"
+          >
+            <IconFlask size={14} />
+            <span>Model Evaluation</span>
+          </button>
           <button
             type="button"
             className="theme-toggle"

@@ -18,6 +18,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from app.engines.url.features import FEATURE_SCHEMA_VERSION
+
 logger = logging.getLogger(__name__)
 
 # Path to the pre-trained model artifact (relative to repo root)
@@ -55,6 +57,12 @@ def load_model() -> Any | None:
             )
             return None
         metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        if metadata.get("feature_schema_version") != FEATURE_SCHEMA_VERSION:
+            logger.warning(
+                "Skipping URL model with incompatible feature schema %r; using structural rules fallback.",
+                metadata.get("feature_schema_version"),
+            )
+            return None
         mode = str(metadata.get("mode", "")).lower()
         if mode != "production":
             logger.warning(
@@ -192,7 +200,7 @@ _RULE_WEIGHTS: list[float] = [
     0.035,   # dash_count
     0.001,   # token_length_max
     0.002,   # dot_count
-    0.40,    # has_redirect_param
+    0.40,    # has_redirect_param (external destination only)
     0.0,     # domain_age_days (network, often -1 — ignored)
     0.0,     # dns_a_count
     0.0,     # dns_mx_present

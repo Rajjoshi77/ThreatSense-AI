@@ -246,6 +246,62 @@ async def test_aggregator_unavailable_image_analysis_reports_unknown():
 
 
 @pytest.mark.asyncio
+async def test_aggregator_excludes_skipped_domains_from_overall_score():
+    from app.aggregator.aggregator import RiskAggregator
+    from app.schemas.schemas import DetectionResult
+
+    artifact = Artifact(type=ArtifactType.URL, raw_content="https://example.com")
+    results = [
+        DetectionResult(
+            detector_id="d10_malicious_url",
+            name="Malicious URL",
+            domain="URL & Domain Security",
+            domain_id="d2",
+            score=0.40,
+            verdict=Verdict.SUSPICIOUS,
+            confidence=0.7,
+            ran=True,
+        ),
+        DetectionResult(
+            detector_id="d01_email_phishing",
+            name="Email Phishing",
+            domain="Phishing & Social Engineering",
+            domain_id="d1",
+            score=0.0,
+            verdict=Verdict.UNKNOWN,
+            confidence=0.0,
+            ran=False,
+        ),
+    ]
+
+    report = await RiskAggregator().aggregate(artifact=artifact, results=results)
+
+    assert report.risk_score == 40.0
+    assert report.verdict == Verdict.SUSPICIOUS
+
+
+async def test_aggregator_empty_applicable_domain_is_zero():
+    from app.aggregator.aggregator import RiskAggregator
+    from app.schemas.schemas import DetectionResult
+
+    artifact = Artifact(type=ArtifactType.URL, raw_content="https://example.com")
+    result = DetectionResult(
+        detector_id="d10_malicious_url",
+        name="Malicious URL",
+        domain="URL & Domain Security",
+        domain_id="d2",
+        score=0.0,
+        verdict=Verdict.SAFE,
+        confidence=0.7,
+        ran=True,
+    )
+
+    report = await RiskAggregator().aggregate(artifact=artifact, results=[result])
+
+    assert report.risk_score == 0.0
+    assert report.verdict == Verdict.SAFE
+
+
 async def test_aggregator_intel_hit_floor():
     from app.aggregator.aggregator import RiskAggregator
     from app.schemas.schemas import DetectionResult, EngineSignals

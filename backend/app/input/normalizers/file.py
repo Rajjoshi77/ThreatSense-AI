@@ -15,6 +15,7 @@ from pathlib import PurePosixPath
 from app.input.normalizers.base import BaseNormalizer
 from app.input.normalizers.utils import (
     detect_mime_from_magic,
+    extract_urls,
     get_extension,
     is_suspicious_extension,
     sha256_hex,
@@ -59,6 +60,17 @@ class FileNormalizer(BaseNormalizer):
         all_suffixes = [s.lower() for s in PurePosixPath(filename).suffixes]
         has_double_extension = len(all_suffixes) >= 2
 
+        text_content = ""
+        if (
+            declared_mime.split(";", 1)[0].strip().lower() == "text/plain"
+            and detected_mime is None
+            and b"\x00" not in raw
+        ):
+            try:
+                text_content = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                logger.info("Skipping NLP text analysis for non-UTF-8 upload %r", filename)
+
         attachment = AttachmentInfo(
             filename=filename,
             declared_mime=declared_mime,
@@ -71,8 +83,9 @@ class FileNormalizer(BaseNormalizer):
 
         return Artifact(
             type=ArtifactType.FILE,
-            raw_content="",
+            raw_content=text_content,
             raw_bytes=raw,
+            extracted_urls=extract_urls(text_content),
             sha256=digest,
             file_size_bytes=len(raw),
             detected_mime=detected_mime,

@@ -151,8 +151,9 @@ class AnalysisContext:
         )
         from app.schemas.schemas import ArtifactType
 
-        if nlp is None and self._artifact.type in (
-            ArtifactType.URL, ArtifactType.QR, ArtifactType.IMAGE
+        if nlp is None and (
+            self._artifact.type in (ArtifactType.URL, ArtifactType.QR, ArtifactType.IMAGE)
+            or (self._artifact.type == ArtifactType.FILE and not self._artifact.raw_content.strip())
         ):
             nlp = NLPSignals(backend_used="not_applicable", text_length=0)
         intel_signals = [

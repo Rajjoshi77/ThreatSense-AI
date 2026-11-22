@@ -271,6 +271,25 @@ def test_file_double_extension_detected() -> None:
     assert artifact.metadata["has_double_extension"] is True
 
 
+def test_plain_text_file_exposes_content_and_urls_for_analysis() -> None:
+    text = "Routine note. More details: https://example.com/info"
+    artifact = FileNormalizer().normalize(
+        text.encode(), filename="notes.txt", mime_type="text/plain"
+    )
+
+    assert artifact.raw_content == text
+    assert artifact.extracted_urls == ["https://example.com/info"]
+
+
+def test_non_text_file_content_is_not_decoded_for_nlp() -> None:
+    artifact = FileNormalizer().normalize(
+        b"%PDF-1.4 binary payload", filename="report.pdf", mime_type="application/pdf"
+    )
+
+    assert artifact.raw_content == ""
+    assert artifact.extracted_urls == []
+
+
 # ── Upload hardening ──────────────────────────────────────────────────────────
 
 

@@ -80,15 +80,15 @@ class MaliciousRedirectsDetector(BaseDetector):
                 matched_text=feats.registered_domain,
             ))
 
-        # ── 2. Open redirect parameters ────────────────────────────────────────
+        # ── 2. External redirect parameters ────────────────────────────────────
         if feats.has_redirect_param:
             score = max(score, 0.45)
             evidence.append(Evidence(
                 source_engine="url",
                 severity=EvidenceSeverity.MEDIUM,
                 description=(
-                    "URL contains an open-redirect parameter (url=, redirect=, next=, etc.) "
-                    "that may forward users to a malicious destination"
+                    "URL contains a redirect parameter pointing to a different host "
+                    "or a non-HTTP destination"
                 ),
                 rule_id="redirect_param",
             ))

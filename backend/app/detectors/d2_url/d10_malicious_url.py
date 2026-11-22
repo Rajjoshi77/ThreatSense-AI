@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from app.core.registry import register_detector
 from app.detectors.base import BaseDetector
+from app.engines.url.features import extract_features, has_combined_suspicious_url_signals
 from app.schemas.schemas import (
     Artifact,
     ArtifactType,
@@ -84,10 +85,28 @@ class MaliciousURLDetector(BaseDetector):
             )
 
         risk = signals.risk_score or 0.0
+        feats = extract_features(url)
+        combined_token_risk = has_combined_suspicious_url_signals(feats)
+        if combined_token_risk:
+            risk = max(risk, _T_SUSPICIOUS)
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
         # Build evidence
         evidence: list[Evidence] = []
+        if combined_token_risk:
+            evidence.append(Evidence(
+                source_engine="url",
+                severity=EvidenceSeverity.MEDIUM,
+                description=(
+                    "URL combines an unfamiliar or higher-risk suffix with multiple "
+                    "account, verification, or credential-related tokens"
+                ),
+                rule_id="combined_url_signals",
+                metadata={
+                    "tld_risk": feats.tld_risk,
+                    "suspicious_token_count": feats.suspicious_token_count,
+                },
+            ))
 
         # SHAP / feature importance evidence
         for feat in (signals.shap_top_features or [])[:5]:
@@ -96,13 +115,13 @@ class MaliciousURLDetector(BaseDetector):
             imp = feat.get("importance", 0)
             if abs(imp) < 0.01:
                 continue
-            direction = "increases" if imp > 0 else "decreases"
+            direction = "positive" if imp > 0 else "negative"
             evidence.append(Evidence(
                 source_engine="url",
                 severity=_severity(abs(imp)),
                 description=(
-                    f"Feature '{name}'={val:.3g} {direction} malicious probability "
-                    f"by {abs(imp):.3f}"
+                    f"URL feature '{name}'={val:.3g} has a {direction} contribution "
+                    f"to the malicious-risk score (model contribution={abs(imp):.3f})"
                 ),
                 rule_id=f"shap_{name}",
                 metadata={"feature": name, "value": val, "shap": imp},

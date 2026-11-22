@@ -279,14 +279,16 @@ $$S_{\text{domain}} = 1 - \prod_{i=1}^{n} (1 - s_i)$$
 $$S_{\text{domain}} = 1 - (1 - 0.60)(1 - 0.70) = 1 - (0.40 \times 0.30) = 1 - 0.12 = 0.88$$
 
 ### 2. Overall Platform Risk Score
-The platform score combines domain scores using weights:
+The platform score combines only domains with at least one applicable detector that ran. Their configured weights are renormalized over the applicable domains; skipped domains do not dilute the result:
 - Domain 1 (Phishing / SE): **30%**
 - Domain 2 (URL & Domain): **30%**
 - Domain 3 (Web Security): **20%**
 - Domain 4 (Email Security): **15%**
 - Domain 5 (Media Threats): **5%**
 
-$$\text{Raw Score} = \sum_{d \in \{D1..D5\}} w_d \times S_d \times 100$$
+$$\text{Raw Score} = \frac{\sum_{d \in A} w_d \times S_d}{\sum_{d \in A} w_d} \times 100$$
+
+where $A$ contains only applicable domains. This score is a rule-based triage score, not a calibrated probability.
 
 ### 3. Hard Security Overrides
 - **Intel Blocklist Match**: If known malicious hash/URL matches local or URLhaus blocklist $\rightarrow$ **Floor at 80/100 (MALICIOUS)**.

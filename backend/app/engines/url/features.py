@@ -19,13 +19,14 @@ import math
 import os
 import re
 from dataclasses import dataclass
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import tldextract
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 _TLD = tldextract.TLDExtract(cache_dir=None)
+FEATURE_SCHEMA_VERSION = 3
 
 _SUSPICIOUS_TOKENS: frozenset[str] = frozenset({
     "login", "signin", "sign-in", "logon", "log-in",
@@ -295,7 +296,23 @@ def extract_features(url: str) -> URLFeatures:
         redirect_params = {"url", "redirect", "next", "goto", "dest",
                            "destination", "return", "returnurl", "rurl",
                            "forward", "link", "target", "out", "go"}
-        has_redirect_param = 1.0 if any(k in redirect_params for k in qs) else 0.0
+        source_host = (parsed.hostname or "").lower().rstrip(".")
+        has_redirect_param = 0.0
+        for key in redirect_params.intersection(qs):
+            for target in qs[key]:
+                target = target.strip()
+                if not target:
+                    continue
+                destination = urlparse(urljoin(url, target))
+                destination_host = (destination.hostname or "").lower().rstrip(".")
+                if destination.scheme.lower() not in {"http", "https"}:
+                    has_redirect_param = 1.0
+                    break
+                if destination_host and source_host and destination_host != source_host:
+                    has_redirect_param = 1.0
+                    break
+            if has_redirect_param:
+                break
 
         return URLFeatures(
             url=url,
@@ -332,6 +349,11 @@ def extract_features(url: str) -> URLFeatures:
     except Exception:
         # Return sentinel features for completely malformed URLs
         return URLFeatures(url=url, url_length=len(url))
+
+
+def has_combined_suspicious_url_signals(features: URLFeatures) -> bool:
+    """Flag the conjunction of an unfamiliar suffix and several sensitive tokens."""
+    return features.tld_risk >= 0.35 and features.suspicious_token_count >= 2
 
 
 def _shannon_entropy(s: str) -> float:

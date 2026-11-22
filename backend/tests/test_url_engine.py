@@ -68,6 +68,23 @@ def test_url_model_skips_synthetic_ci_checkpoint(tmp_path, monkeypatch) -> None:
     assert url_model.load_model() is None
 
 
+def test_url_model_skips_checkpoint_with_stale_feature_schema(tmp_path, monkeypatch) -> None:
+    import json
+
+    from app.engines.url import model as url_model
+
+    model_path = tmp_path / "model.joblib"
+    model_path.with_suffix(".meta.json").write_text(
+        json.dumps({"mode": "production", "feature_schema_version": 1}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(url_model, "_MODEL_PATH", model_path)
+    monkeypatch.setattr(url_model, "_model", None)
+    monkeypatch.setattr(url_model, "_model_loaded", False)
+
+    assert url_model.load_model() is None
+
+
 def test_feature_vector_length_is_stable() -> None:
     feats = extract_features("https://example.com")
     vector = feats.to_vector()
@@ -130,8 +147,23 @@ def test_at_sign_detected() -> None:
     assert feats.has_at_sign == 1.0
 
 
-def test_redirect_param_detected() -> None:
+def test_external_redirect_param_detected() -> None:
     feats = extract_features("https://example.com/go?url=https://evil.com")
+    assert feats.has_redirect_param == 1.0
+
+
+def test_local_redirect_param_is_not_flagged() -> None:
+    for url in (
+        "https://example.com/redirect?redirect=login",
+        "https://example.com/redirect?next=%2Faccount",
+    ):
+        assert extract_features(url).has_redirect_param == 0.0
+
+
+def test_encoded_external_redirect_param_is_detected() -> None:
+    feats = extract_features(
+        "https://example.com/go?redirect=https%3A%2F%2Fevil.example%2Flogin"
+    )
     assert feats.has_redirect_param == 1.0
 
 

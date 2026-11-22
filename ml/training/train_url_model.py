@@ -277,7 +277,6 @@ def _domain_aware_split(X: list, y: list, urls: list[str] | None = None) -> tupl
 def train(small: bool = False) -> None:
     import joblib
     import numpy as np
-    from app.engines.url.features import URLFeatures
     from sklearn.calibration import CalibratedClassifierCV
     from sklearn.metrics import (
         average_precision_score,
@@ -288,6 +287,8 @@ def train(small: bool = False) -> None:
     )
     from sklearn.model_selection import train_test_split
     from xgboost import XGBClassifier
+
+    from app.engines.url.features import FEATURE_SCHEMA_VERSION, URLFeatures
 
     feature_names = URLFeatures.feature_names()
 
@@ -374,6 +375,7 @@ def train(small: bool = False) -> None:
     meta = {
         "version": version,
         "mode": mode_label,
+        "feature_schema_version": FEATURE_SCHEMA_VERSION,
         "training_data": "synthetic_ci" if small else "PhiUSIIL+Tranco",
         "feature_names": feature_names,
         "n_features": len(feature_names),
