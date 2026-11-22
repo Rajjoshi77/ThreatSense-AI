@@ -406,7 +406,7 @@ cd backend
 
 ### 4. Train the DeBERTa NLP Model (optional)
 
-The application defaults to `NLP_BACKEND=finetuned` and uses a complete trained checkpoint when available (weights are gitignored, ~542 MB). If weights are missing or inference fails, startup and analysis continue with the rules backend and each report identifies the backend actually used. See [`ml/artifacts/nlp_model/README.md`](ml/artifacts/nlp_model/README.md).
+The application defaults to `NLP_BACKEND=finetuned` and uses a complete trained checkpoint when available (weights are gitignored, ~542 MB). If weights are missing, inference fails, or the container memory cap is below `NLP_MIN_MEMORY_MB` (default 1536 MiB), startup and analysis continue with the rules backend and reports identify the backend actually used. `/health` reports the effective backend. See [`ml/artifacts/nlp_model/README.md`](ml/artifacts/nlp_model/README.md).
 
 Normal training requires at least 50 human-reviewed examples in `ml/data/gold_labels.csv`:
 

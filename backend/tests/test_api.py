@@ -32,6 +32,20 @@ async def test_health_includes_nlp_backend(client) -> None:
     assert data["nlp_backend"] in ("rules", "zeroshot", "finetuned", "ensemble")
 
 
+async def test_health_reports_rules_when_deberta_is_unavailable(client, monkeypatch) -> None:
+    """Health reports the effective rules fallback, not just configured finetuned."""
+    from app.core.config import NLPBackend, settings
+    from app.engines.nlp.backends import finetuned as finetuned_mod
+
+    monkeypatch.setattr(settings, "NLP_BACKEND", NLPBackend.FINETUNED)
+    monkeypatch.setattr(finetuned_mod, "is_finetuned_available", lambda: False)
+
+    resp = await client.get("/health")
+
+    assert resp.status_code == 200
+    assert resp.json()["nlp_backend"] == "rules"
+
+
 async def test_detectors_total_is_22(client) -> None:
     """GET /detectors total must be exactly 22."""
     resp = await client.get("/detectors")

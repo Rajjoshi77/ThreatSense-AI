@@ -14,6 +14,9 @@ services:
         value: sqlite+aiosqlite:///threatsense.db
       - key: NLP_BACKEND
         value: finetuned
+      # DeBERTa uses more than Render's 512 MiB free-instance memory; use rules below this limit.
+      - key: NLP_MIN_MEMORY_MB
+        value: "1536"
       # Configure this to a private/public Hugging Face model ID with the trained checkpoint.
       - key: NLP_FINETUNED_PATH
         sync: false

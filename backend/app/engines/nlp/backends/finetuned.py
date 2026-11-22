@@ -52,10 +52,36 @@ SIGNAL_LABELS = [
 ]
 
 
+def _container_memory_limit_bytes() -> int | None:
+    """Return the container memory limit from cgroups when available."""
+    for path in (Path("/sys/fs/cgroup/memory.max"), Path("/sys/fs/cgroup/memory/memory.limit_in_bytes")):
+        try:
+            value = path.read_text(encoding="ascii").strip()
+            if value != "max":
+                limit = int(value)
+                # cgroup v1 reports a large sentinel value when no memory cap exists.
+                if limit < (1 << 60):
+                    return limit
+        except (OSError, ValueError):
+            continue
+    return None
+
+
 @lru_cache(maxsize=1)
 def _load_model() -> tuple[Any, Any] | None:
-    """Load a local or Hugging Face fine-tuned checkpoint once per process."""
+    """Load a fine-tuned checkpoint when the container has sufficient memory."""
     from app.core.config import settings
+
+    memory_limit = _container_memory_limit_bytes()
+    minimum_memory = settings.NLP_MIN_MEMORY_MB * 1024 * 1024
+    if memory_limit is not None and memory_limit < minimum_memory:
+        logger.warning(
+            "Skipping DeBERTa checkpoint: container memory limit is %d MiB; "
+            "NLP_MIN_MEMORY_MB=%d. Using rules NLP fallback.",
+            memory_limit // (1024 * 1024),
+            settings.NLP_MIN_MEMORY_MB,
+        )
+        return None
 
     configured_source = os.getenv(
         "NLP_FINETUNED_PATH", settings.NLP_FINETUNED_PATH
@@ -134,9 +160,14 @@ def _load_model() -> tuple[Any, Any] | None:
         return None
 
 
+def is_finetuned_available() -> bool:
+    """Return whether the configured DeBERTa checkpoint loaded successfully."""
+    return _load_model() is not None
+
+
 def ensure_model_loaded() -> bool:
     """Warm the configured checkpoint; report False so callers can use rules."""
-    if _load_model() is not None:
+    if is_finetuned_available():
         return True
 
     from app.core.config import settings

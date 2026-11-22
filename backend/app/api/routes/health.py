@@ -32,10 +32,17 @@ async def health(db: AsyncSession = Depends(get_db)) -> HealthResponse:
     except Exception:
         pass
 
+    active_nlp_backend = settings.NLP_BACKEND.value
+    if active_nlp_backend == "finetuned":
+        from app.engines.nlp.backends.finetuned import is_finetuned_available
+
+        if not is_finetuned_available():
+            active_nlp_backend = "rules"
+
     return HealthResponse(
         status="ok" if db_status == "connected" else "degraded",
         version=settings.APP_VERSION,
-        nlp_backend=settings.NLP_BACKEND.value,
+        nlp_backend=active_nlp_backend,
         database=db_status,
         detector_count=len(get_all_detectors()),
         uptime_seconds=round(time.monotonic() - _START_TIME, 1),

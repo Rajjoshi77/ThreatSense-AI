@@ -59,6 +59,13 @@ class Settings(BaseSettings):
             "Local checkpoint directory or Hugging Face Hub model ID for the fine-tuned NLP backend."
         ),
     )
+    NLP_MIN_MEMORY_MB: int = Field(
+        default=1536,
+        ge=512,
+        description=(
+            "Minimum container memory required before loading DeBERTa; lower limits use rules fallback."
+        ),
+    )
 
     # ── Security ─────────────────────────────────────────────────────────────
     SECRET_KEY: str = "dev-secret-key-change-in-production"

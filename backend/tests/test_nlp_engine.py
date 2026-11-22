@@ -172,6 +172,22 @@ async def test_finetuned_backend_uses_trained_model():
     assert signals.phishing_intent > benign.phishing_intent
 
 
+def test_finetuned_model_skips_loading_below_container_memory_limit(monkeypatch):
+    """Small containers should keep the API alive with the rules backend."""
+    from app.core.config import settings
+    from app.engines.nlp.backends import finetuned as finetuned_mod
+
+    finetuned_mod._load_model.cache_clear()
+    monkeypatch.setattr(settings, "NLP_MIN_MEMORY_MB", 1536)
+    monkeypatch.setattr(
+        finetuned_mod, "_container_memory_limit_bytes", lambda: 512 * 1024 * 1024
+    )
+    try:
+        assert finetuned_mod._load_model() is None
+    finally:
+        finetuned_mod._load_model.cache_clear()
+
+
 @pytest.mark.asyncio
 async def test_finetuned_backend_falls_back_to_rules_when_artifacts_missing(tmp_path, monkeypatch):
     """Without a checkpoint, DeBERTa mode returns rules signals rather than failing."""

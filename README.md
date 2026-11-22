@@ -172,6 +172,7 @@ Backend settings are read from environment variables and an optional `.env` file
 | `DATABASE_URL` | Async database URL; defaults to local SQLite |
 | `NLP_BACKEND` | NLP backend selection; defaults to `finetuned`, with automatic rules fallback if unavailable |
 | `NLP_FINETUNED_PATH` | Local trained checkpoint directory or Hugging Face model ID for `finetuned` |
+| `NLP_MIN_MEMORY_MB` | Minimum container memory to load DeBERTa; below it, use rules (default `1536`) |
 | `HF_TOKEN` | Hugging Face access token when using a private model repository; keep it secret |
 | `API_KEY` | Optional API authentication; empty disables authentication |
 | `API_KEY_HEADER` | Header name for API-key authentication |
@@ -184,7 +185,7 @@ The bundled threat-intelligence lists are in `backend/app/engines/intel/data/`. 
 
 ## Machine-learning notes
 
-- **Default mode:** `NLP_BACKEND=finetuned`. If its checkpoint is missing or inference fails, the service automatically uses rules and the analysis report identifies `rules` as the backend that ran. Set `NLP_BACKEND=rules` to select it directly.
+- **Default mode:** `NLP_BACKEND=finetuned`. If its checkpoint is missing, inference fails, or the container memory limit is below `NLP_MIN_MEMORY_MB` (default 1536 MiB), the service uses rules and the analysis report identifies `rules` as the backend that ran. This allows the API to start within small memory limits such as Render's 512 MiB free instance; DeBERTa requires a larger instance. Set `NLP_BACKEND=rules` to select rules directly.
 - **URL model:** The application uses URL-feature heuristics when `ml/artifacts/url_model/model.joblib` is absent. The committed URL model report describes a small synthetic CI model, not a production-validated model.
 - **Zero-shot NLP:** `NLP_BACKEND=zeroshot` requires the optional Transformers stack and model availability; `NLP_ZEROSHOT=true` enables model loading. Without it, the backend falls back to rules.
 - **Fine-tuned NLP:** Training code and notes live under `ml/`. The checkpoint weights are not included in Git; the checked-in config/tokenizer metadata alone cannot run inference. To use a model, place the complete trained checkpoint in `ml/artifacts/nlp_model/`, or set `NLP_FINETUNED_PATH` to a local checkpoint directory or Hugging Face model ID. A private Hugging Face repository also requires `HF_TOKEN` in the runtime environment. If the fine-tuned checkpoint is unavailable, the service logs a warning and falls back to rules rather than rejecting startup or returning a false successful DeBERTa result.
